@@ -1,0 +1,6 @@
+country_code,country_name,gdp_per_capita,population,internet_penetration,market_size_level,competition_level,logistics_difficulty,notes
+US,United States,82769,342000000,92.0,high,high,medium,Large home textile market with strong Amazon and eBay price competition
+GB,United Kingdom,48913,68000000,96.0,medium,high,medium,High online shopping penetration and demand for compact bedding
+JP,Japan,33834,124000000,94.0,medium,medium,low,Quality sensitive market with stable demand for pet home and cooling bedding
+AU,Australia,64712,27000000,95.0,medium,medium,medium,Seasonal cooling and outdoor home textile opportunities
+SG,Singapore,84714,5900000,93.0,medium,medium,low,Small home and humid climate support compact bedding and quick dry textiles

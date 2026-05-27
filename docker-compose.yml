@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-supinzhihang}"
+      POSTGRES_USER: "${POSTGRES_USER:-supin_app}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: "${APP_ENV:-local}"
+      BACKEND_URL: "${BACKEND_URL:-http://localhost:8000}"
+      FRONTEND_URL: "${FRONTEND_URL:-http://localhost:3000}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
+      DATABASE_URL: "${DATABASE_URL:?Set DATABASE_URL in .env}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
+      BAILIAN_API_KEY: "${BAILIAN_API_KEY:-}"
+      BAILIAN_BASE_URL: "${BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
+      BAILIAN_MODEL: "${BAILIAN_MODEL:-qwen3.6-plus}"
+      EBAY_CLIENT_ID: "${EBAY_CLIENT_ID:-}"
+      EBAY_CLIENT_SECRET: "${EBAY_CLIENT_SECRET:-}"
+      UN_COMTRADE_API_KEY: "${UN_COMTRADE_API_KEY:-}"
+      RAKUTEN_APPLICATION_ID: "${RAKUTEN_APPLICATION_ID:-}"
+      RAKUTEN_APP_ID: "${RAKUTEN_APP_ID:-}"
+      YOUTUBE_DATA_API_KEY: "${YOUTUBE_DATA_API_KEY:-}"
+      YOUTUBE_API_KEY: "${YOUTUBE_API_KEY:-}"
+      ETSY_KEYSTRING: "${ETSY_KEYSTRING:-}"
+      ETSY_API_KEY: "${ETSY_API_KEY:-}"
+      ETSY_SHARED_SECRET: "${ETSY_SHARED_SECRET:-}"
+      REDDIT_CLIENT_ID: "${REDDIT_CLIENT_ID:-}"
+      REDDIT_CLIENT_SECRET: "${REDDIT_CLIENT_SECRET:-}"
+      REDDIT_REDIRECT_URI: "${REDDIT_REDIRECT_URI:-http://localhost:8000/auth/reddit/callback}"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    environment:
+      APP_ENV: "${APP_ENV:-local}"
+      NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}"
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  redis_data:

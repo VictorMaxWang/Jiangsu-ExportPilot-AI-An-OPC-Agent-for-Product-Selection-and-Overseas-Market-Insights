@@ -1,0 +1,85 @@
+platform,country,keyword,title,price,currency,rating,review_count,product_url,image_url,collected_at
+eBay,US,pet cooling mat,Washable pet cooling mat for small dogs,18.99,USD,4.5,286,https://sample.example/ebay/p001-us-01,https://sample.example/images/p001-us-01.jpg,2026-05-01T09:00:00+00:00
+eBay,GB,boho bedroom,Boho tassel throw blanket for bedroom,24.50,GBP,4.6,174,https://sample.example/ebay/p002-gb-01,https://sample.example/images/p002-gb-01.jpg,2026-05-01T09:05:00+00:00
+eBay,AU,cotton bedding set,Cotton duvet cover set four piece,54.90,AUD,4.4,98,https://sample.example/ebay/p003-au-01,https://sample.example/images/p003-au-01.jpg,2026-05-01T09:10:00+00:00
+eBay,US,kids pillowcase,Soft cartoon kids pillowcase pair,12.99,USD,4.7,211,https://sample.example/ebay/p004-us-01,https://sample.example/images/p004-us-01.jpg,2026-05-01T09:15:00+00:00
+eBay,GB,cooling quilt,Lightweight summer cooling quilt,29.99,GBP,4.3,145,https://sample.example/ebay/p005-gb-01,https://sample.example/images/p005-gb-01.jpg,2026-05-01T09:20:00+00:00
+eBay,AU,sofa throw,Soft fleece sofa throw blanket,21.80,AUD,4.5,323,https://sample.example/ebay/p006-au-01,https://sample.example/images/p006-au-01.jpg,2026-05-01T09:25:00+00:00
+eBay,US,bath towel,Large cotton bath towel quick dry,15.49,USD,4.4,412,https://sample.example/ebay/p007-us-01,https://sample.example/images/p007-us-01.jpg,2026-05-01T09:30:00+00:00
+eBay,GB,anti mite pillowcase,Anti allergy pillow protector pair,13.25,GBP,4.6,88,https://sample.example/ebay/p008-gb-01,https://sample.example/images/p008-gb-01.jpg,2026-05-01T09:35:00+00:00
+eBay,US,dorm room bedding,Twin XL dorm bedding set,49.99,USD,4.2,67,https://sample.example/ebay/p009-us-01,https://sample.example/images/p009-us-01.jpg,2026-05-01T09:40:00+00:00
+eBay,AU,baby swaddle,Cotton muslin baby swaddle wrap,16.90,AUD,4.8,251,https://sample.example/ebay/p010-au-01,https://sample.example/images/p010-au-01.jpg,2026-05-01T09:45:00+00:00
+eBay,US,cooling quilt,Breathable thin comforter for hot sleepers,34.99,USD,4.1,124,https://sample.example/ebay/p005-us-02,https://sample.example/images/p005-us-02.jpg,2026-05-01T09:50:00+00:00
+eBay,GB,pet cooling mat,Foldable pet cooling pad blue,14.99,GBP,4.3,92,https://sample.example/ebay/p001-gb-02,https://sample.example/images/p001-gb-02.jpg,2026-05-01T09:55:00+00:00
+eBay,AU,boho blanket,Geometric boho sofa blanket,27.40,AUD,4.7,176,https://sample.example/ebay/p002-au-02,https://sample.example/images/p002-au-02.jpg,2026-05-01T10:00:00+00:00
+eBay,US,bath towel,Hotel style towel set cotton,26.99,USD,4.5,389,https://sample.example/ebay/p007-us-02,https://sample.example/images/p007-us-02.jpg,2026-05-01T10:05:00+00:00
+Amazon Sample,US,pet cooling mat,Pressure activated dog cooling mat,22.99,USD,4.4,1532,https://sample.example/amazon/p001-us-01,https://sample.example/images/a-p001-us-01.jpg,2026-05-02T09:00:00+00:00
+Amazon Sample,GB,boho bedroom,Boho woven throw blanket with tassels,31.99,GBP,4.6,864,https://sample.example/amazon/p002-gb-01,https://sample.example/images/a-p002-gb-01.jpg,2026-05-02T09:05:00+00:00
+Amazon Sample,US,cotton bedding set,Breathable cotton duvet cover set queen,68.99,USD,4.5,2401,https://sample.example/amazon/p003-us-01,https://sample.example/images/a-p003-us-01.jpg,2026-05-02T09:10:00+00:00
+Amazon Sample,AU,kids pillowcase,Kids cotton pillowcase two pack,19.99,AUD,4.7,502,https://sample.example/amazon/p004-au-01,https://sample.example/images/a-p004-au-01.jpg,2026-05-02T09:15:00+00:00
+Amazon Sample,US,cooling quilt,Cooling blanket for summer sleep,39.99,USD,4.3,1186,https://sample.example/amazon/p005-us-01,https://sample.example/images/a-p005-us-01.jpg,2026-05-02T09:20:00+00:00
+Amazon Sample,GB,sofa throw,Fleece throw blanket for couch,18.99,GBP,4.6,2140,https://sample.example/amazon/p006-gb-01,https://sample.example/images/a-p006-gb-01.jpg,2026-05-02T09:25:00+00:00
+Amazon Sample,US,bath towel,Quick dry cotton bath towel,20.99,USD,4.4,1743,https://sample.example/amazon/p007-us-01,https://sample.example/images/a-p007-us-01.jpg,2026-05-02T09:30:00+00:00
+Amazon Sample,AU,anti mite pillowcase,Dust mite proof pillow covers,24.99,AUD,4.5,731,https://sample.example/amazon/p008-au-01,https://sample.example/images/a-p008-au-01.jpg,2026-05-02T09:35:00+00:00
+Amazon Sample,US,dorm room bedding,Twin XL dorm comforter and sheet set,59.99,USD,4.2,955,https://sample.example/amazon/p009-us-01,https://sample.example/images/a-p009-us-01.jpg,2026-05-02T09:40:00+00:00
+Amazon Sample,GB,baby swaddle,Muslin baby swaddle blanket three pack,21.99,GBP,4.8,1288,https://sample.example/amazon/p010-gb-01,https://sample.example/images/a-p010-gb-01.jpg,2026-05-02T09:45:00+00:00
+Amazon Sample,US,boho blanket,Decorative boho bed throw,35.99,USD,4.4,640,https://sample.example/amazon/p002-us-02,https://sample.example/images/a-p002-us-02.jpg,2026-05-02T09:50:00+00:00
+Amazon Sample,AU,cooling quilt,Lightweight washable summer quilt,49.99,AUD,4.1,288,https://sample.example/amazon/p005-au-02,https://sample.example/images/a-p005-au-02.jpg,2026-05-02T09:55:00+00:00
+Amazon Sample,GB,dorm room bedding,Student bedding bundle single size,44.99,GBP,4.3,389,https://sample.example/amazon/p009-gb-02,https://sample.example/images/a-p009-gb-02.jpg,2026-05-02T10:00:00+00:00
+Amazon Sample,US,anti mite pillowcase,Allergy pillowcase zippered cover,15.99,USD,4.6,1567,https://sample.example/amazon/p008-us-02,https://sample.example/images/a-p008-us-02.jpg,2026-05-02T10:05:00+00:00
+Shopee Sample,SG,pet cooling mat,Pet cooling pad washable summer,17.90,SGD,4.8,823,https://sample.example/shopee/p001-sg-01,https://sample.example/images/s-p001-sg-01.jpg,2026-05-03T09:00:00+00:00
+Shopee Sample,MY,boho bedroom,Boho sofa blanket with tassel,58.90,MYR,4.7,642,https://sample.example/shopee/p002-my-01,https://sample.example/images/s-p002-my-01.jpg,2026-05-03T09:05:00+00:00
+Shopee Sample,SG,cotton bedding set,Queen cotton bedding four piece set,69.90,SGD,4.6,934,https://sample.example/shopee/p003-sg-01,https://sample.example/images/s-p003-sg-01.jpg,2026-05-03T09:10:00+00:00
+Shopee Sample,MY,kids pillowcase,Kids pillow cover soft cotton,18.50,MYR,4.8,301,https://sample.example/shopee/p004-my-01,https://sample.example/images/s-p004-my-01.jpg,2026-05-03T09:15:00+00:00
+Shopee Sample,SG,cooling quilt,Cool touch summer blanket single,31.90,SGD,4.5,477,https://sample.example/shopee/p005-sg-01,https://sample.example/images/s-p005-sg-01.jpg,2026-05-03T09:20:00+00:00
+Shopee Sample,MY,sofa throw,Fleece sofa throw for living room,39.90,MYR,4.6,710,https://sample.example/shopee/p006-my-01,https://sample.example/images/s-p006-my-01.jpg,2026-05-03T09:25:00+00:00
+Shopee Sample,SG,bath towel,Cotton bath towel absorbent,12.90,SGD,4.7,1220,https://sample.example/shopee/p007-sg-01,https://sample.example/images/s-p007-sg-01.jpg,2026-05-03T09:30:00+00:00
+Shopee Sample,MY,anti mite pillowcase,Anti dust mite pillow cover,16.90,MYR,4.5,224,https://sample.example/shopee/p008-my-01,https://sample.example/images/s-p008-my-01.jpg,2026-05-03T09:35:00+00:00
+Shopee Sample,SG,dorm room bedding,Compact dorm bedding set,52.90,SGD,4.4,188,https://sample.example/shopee/p009-sg-01,https://sample.example/images/s-p009-sg-01.jpg,2026-05-03T09:40:00+00:00
+Shopee Sample,MY,baby swaddle,Muslin baby wrap blanket,22.90,MYR,4.9,514,https://sample.example/shopee/p010-my-01,https://sample.example/images/s-p010-my-01.jpg,2026-05-03T09:45:00+00:00
+Shopee Sample,SG,home decor,Boho throw blanket home decor,28.90,SGD,4.6,331,https://sample.example/shopee/p002-sg-02,https://sample.example/images/s-p002-sg-02.jpg,2026-05-03T09:50:00+00:00
+Shopee Sample,MY,pet cooling mat,Cooling mat for cat and puppy,28.90,MYR,4.7,586,https://sample.example/shopee/p001-my-02,https://sample.example/images/s-p001-my-02.jpg,2026-05-03T09:55:00+00:00
+Shopee Sample,SG,cooling quilt,Airy summer quilt for humid rooms,36.90,SGD,4.3,204,https://sample.example/shopee/p005-sg-02,https://sample.example/images/s-p005-sg-02.jpg,2026-05-03T10:00:00+00:00
+Shopee Sample,MY,bath towel,Thick cotton towel quick absorb,25.90,MYR,4.6,699,https://sample.example/shopee/p007-my-02,https://sample.example/images/s-p007-my-02.jpg,2026-05-03T10:05:00+00:00
+Temu Sample,US,pet cooling mat,Portable cooling pad for pets,11.49,USD,4.2,981,https://sample.example/temu/p001-us-01,https://sample.example/images/t-p001-us-01.jpg,2026-05-04T09:00:00+00:00
+Temu Sample,GB,boho bedroom,Boho knitted throw blanket,15.99,GBP,4.4,752,https://sample.example/temu/p002-gb-01,https://sample.example/images/t-p002-gb-01.jpg,2026-05-04T09:05:00+00:00
+Temu Sample,US,cotton bedding set,Printed duvet cover bedding set,32.99,USD,4.1,1290,https://sample.example/temu/p003-us-01,https://sample.example/images/t-p003-us-01.jpg,2026-05-04T09:10:00+00:00
+Temu Sample,AU,kids pillowcase,Children pillowcase cute pattern,8.99,AUD,4.5,440,https://sample.example/temu/p004-au-01,https://sample.example/images/t-p004-au-01.jpg,2026-05-04T09:15:00+00:00
+Temu Sample,US,cooling quilt,Cold touch blanket lightweight,23.99,USD,4.0,522,https://sample.example/temu/p005-us-01,https://sample.example/images/t-p005-us-01.jpg,2026-05-04T09:20:00+00:00
+Temu Sample,GB,sofa throw,Soft couch blanket solid color,12.99,GBP,4.3,963,https://sample.example/temu/p006-gb-01,https://sample.example/images/t-p006-gb-01.jpg,2026-05-04T09:25:00+00:00
+Temu Sample,US,bath towel,Quick dry bath towel large,9.99,USD,4.2,1188,https://sample.example/temu/p007-us-01,https://sample.example/images/t-p007-us-01.jpg,2026-05-04T09:30:00+00:00
+Temu Sample,AU,anti mite pillowcase,Pillow protector anti mite pair,12.49,AUD,4.4,357,https://sample.example/temu/p008-au-01,https://sample.example/images/t-p008-au-01.jpg,2026-05-04T09:35:00+00:00
+Temu Sample,US,dorm room bedding,Student dorm bedding bundle,38.99,USD,4.0,218,https://sample.example/temu/p009-us-01,https://sample.example/images/t-p009-us-01.jpg,2026-05-04T09:40:00+00:00
+Temu Sample,GB,baby swaddle,Breathable baby swaddle blanket,10.99,GBP,4.6,803,https://sample.example/temu/p010-gb-01,https://sample.example/images/t-p010-gb-01.jpg,2026-05-04T09:45:00+00:00
+Temu Sample,AU,pet cooling mat,Foldable cooling mat for dogs,19.99,AUD,4.1,409,https://sample.example/temu/p001-au-02,https://sample.example/images/t-p001-au-02.jpg,2026-05-04T09:50:00+00:00
+Temu Sample,US,boho blanket,Neutral boho throw for couch,18.49,USD,4.3,616,https://sample.example/temu/p002-us-02,https://sample.example/images/t-p002-us-02.jpg,2026-05-04T09:55:00+00:00
+Temu Sample,GB,dorm room bedding,Budget bedding set for students,27.99,GBP,4.1,166,https://sample.example/temu/p009-gb-02,https://sample.example/images/t-p009-gb-02.jpg,2026-05-04T10:00:00+00:00
+Temu Sample,US,home decor,Textured sofa throw home decor,14.99,USD,4.2,547,https://sample.example/temu/p006-us-02,https://sample.example/images/t-p006-us-02.jpg,2026-05-04T10:05:00+00:00
+Etsy Sample,US,boho bedroom,Handmade look boho throw blanket,46.00,USD,4.8,312,https://sample.example/etsy/p002-us-01,https://sample.example/images/e-p002-us-01.jpg,2026-05-05T09:00:00+00:00
+Etsy Sample,GB,baby swaddle,Personalized muslin baby swaddle,28.00,GBP,4.9,208,https://sample.example/etsy/p010-gb-01,https://sample.example/images/e-p010-gb-01.jpg,2026-05-05T09:05:00+00:00
+Etsy Sample,US,pet cooling mat,Minimal pet cooling mat cover,35.00,USD,4.7,96,https://sample.example/etsy/p001-us-01,https://sample.example/images/e-p001-us-01.jpg,2026-05-05T09:10:00+00:00
+Etsy Sample,AU,kids pillowcase,Custom kids pillowcase name print,24.00,AUD,4.8,141,https://sample.example/etsy/p004-au-01,https://sample.example/images/e-p004-au-01.jpg,2026-05-05T09:15:00+00:00
+Etsy Sample,US,cotton bedding set,Natural cotton bedding set neutral,92.00,USD,4.7,187,https://sample.example/etsy/p003-us-01,https://sample.example/images/e-p003-us-01.jpg,2026-05-05T09:20:00+00:00
+Etsy Sample,GB,sofa throw,Handwoven style couch throw blanket,38.00,GBP,4.8,244,https://sample.example/etsy/p006-gb-01,https://sample.example/images/e-p006-gb-01.jpg,2026-05-05T09:25:00+00:00
+Etsy Sample,US,bath towel,Embroidered cotton bath towel,32.00,USD,4.6,120,https://sample.example/etsy/p007-us-01,https://sample.example/images/e-p007-us-01.jpg,2026-05-05T09:30:00+00:00
+Etsy Sample,AU,anti mite pillowcase,Organic feel pillow protector cover,29.00,AUD,4.5,77,https://sample.example/etsy/p008-au-01,https://sample.example/images/e-p008-au-01.jpg,2026-05-05T09:35:00+00:00
+Etsy Sample,US,dorm room bedding,Curated dorm bedding aesthetic set,84.00,USD,4.6,64,https://sample.example/etsy/p009-us-01,https://sample.example/images/e-p009-us-01.jpg,2026-05-05T09:40:00+00:00
+Etsy Sample,GB,cooling quilt,Minimal summer quilt coverlet,42.00,GBP,4.4,58,https://sample.example/etsy/p005-gb-01,https://sample.example/images/e-p005-gb-01.jpg,2026-05-05T09:45:00+00:00
+Etsy Sample,US,home decor,Boho blanket for neutral home decor,52.00,USD,4.9,276,https://sample.example/etsy/p002-us-02,https://sample.example/images/e-p002-us-02.jpg,2026-05-05T09:50:00+00:00
+Etsy Sample,AU,baby swaddle,Gender neutral baby wrap blanket,31.00,AUD,4.8,163,https://sample.example/etsy/p010-au-02,https://sample.example/images/e-p010-au-02.jpg,2026-05-05T09:55:00+00:00
+Etsy Sample,US,kids pillowcase,Personalized pillowcase for kids room,21.00,USD,4.7,118,https://sample.example/etsy/p004-us-02,https://sample.example/images/e-p004-us-02.jpg,2026-05-05T10:00:00+00:00
+Etsy Sample,GB,sofa throw,Chunky look sofa throw blanket,44.00,GBP,4.8,133,https://sample.example/etsy/p006-gb-02,https://sample.example/images/e-p006-gb-02.jpg,2026-05-05T10:05:00+00:00
+Rakuten Sample,JP,pet cooling mat,ひんやりペットマット washable sample,1980,JPY,4.4,362,https://sample.example/rakuten/p001-jp-01,https://sample.example/images/r-p001-jp-01.jpg,2026-05-06T09:00:00+00:00
+Rakuten Sample,JP,boho bedroom,Boho style throw blanket sample,3680,JPY,4.5,184,https://sample.example/rakuten/p002-jp-01,https://sample.example/images/r-p002-jp-01.jpg,2026-05-06T09:05:00+00:00
+Rakuten Sample,JP,cotton bedding set,Cotton bedding set four piece sample,7980,JPY,4.3,271,https://sample.example/rakuten/p003-jp-01,https://sample.example/images/r-p003-jp-01.jpg,2026-05-06T09:10:00+00:00
+Rakuten Sample,JP,kids pillowcase,Kids pillow cover soft sample,1280,JPY,4.6,96,https://sample.example/rakuten/p004-jp-01,https://sample.example/images/r-p004-jp-01.jpg,2026-05-06T09:15:00+00:00
+Rakuten Sample,JP,cooling quilt,Cool touch summer quilt sample,4980,JPY,4.2,325,https://sample.example/rakuten/p005-jp-01,https://sample.example/images/r-p005-jp-01.jpg,2026-05-06T09:20:00+00:00
+Rakuten Sample,JP,sofa throw,Fleece sofa blanket sample,2980,JPY,4.5,411,https://sample.example/rakuten/p006-jp-01,https://sample.example/images/r-p006-jp-01.jpg,2026-05-06T09:25:00+00:00
+Rakuten Sample,JP,bath towel,Cotton bath towel sample,1480,JPY,4.4,530,https://sample.example/rakuten/p007-jp-01,https://sample.example/images/r-p007-jp-01.jpg,2026-05-06T09:30:00+00:00
+Rakuten Sample,JP,anti mite pillowcase,Anti mite pillow cover sample,1680,JPY,4.3,154,https://sample.example/rakuten/p008-jp-01,https://sample.example/images/r-p008-jp-01.jpg,2026-05-06T09:35:00+00:00
+Rakuten Sample,JP,dorm room bedding,Compact single bedding set sample,5980,JPY,4.1,82,https://sample.example/rakuten/p009-jp-01,https://sample.example/images/r-p009-jp-01.jpg,2026-05-06T09:40:00+00:00
+Rakuten Sample,JP,baby swaddle,Muslin baby swaddle sample,2380,JPY,4.7,266,https://sample.example/rakuten/p010-jp-01,https://sample.example/images/r-p010-jp-01.jpg,2026-05-06T09:45:00+00:00
+Rakuten Sample,JP,home decor,Neutral throw blanket sample,3280,JPY,4.4,208,https://sample.example/rakuten/p002-jp-02,https://sample.example/images/r-p002-jp-02.jpg,2026-05-06T09:50:00+00:00
+Rakuten Sample,JP,pet cooling mat,Summer dog cooling pad sample,2280,JPY,4.5,390,https://sample.example/rakuten/p001-jp-02,https://sample.example/images/r-p001-jp-02.jpg,2026-05-06T09:55:00+00:00
+Rakuten Sample,JP,cooling quilt,Light cool blanket sample,3580,JPY,4.2,147,https://sample.example/rakuten/p005-jp-02,https://sample.example/images/r-p005-jp-02.jpg,2026-05-06T10:00:00+00:00
+Rakuten Sample,JP,bath towel,Absorbent hotel towel sample,1880,JPY,4.5,438,https://sample.example/rakuten/p007-jp-02,https://sample.example/images/r-p007-jp-02.jpg,2026-05-06T10:05:00+00:00

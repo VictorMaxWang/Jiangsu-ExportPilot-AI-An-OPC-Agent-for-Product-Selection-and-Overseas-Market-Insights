@@ -1,0 +1,41 @@
+hs_code,product_category,reporter,partner,year,flow,trade_value_usd,quantity,source
+630221,Cotton bed linen,US,China,2023,Import,1285000000,46200000,UN Comtrade Sample
+630221,Cotton bed linen,US,China,2024,Import,1342000000,47800000,UN Comtrade Sample
+630140,Blankets and travelling rugs,US,China,2023,Import,624000000,31800000,UN Comtrade Sample
+630140,Blankets and travelling rugs,US,China,2024,Import,651000000,33200000,UN Comtrade Sample
+630260,Toilet and kitchen linen,US,China,2023,Import,498000000,28600000,UN Comtrade Sample
+630260,Toilet and kitchen linen,US,China,2024,Import,521000000,29700000,UN Comtrade Sample
+940490,Bedding articles and cushions,US,China,2023,Import,1760000000,38900000,UN Comtrade Sample
+940490,Bedding articles and cushions,US,China,2024,Import,1815000000,40100000,UN Comtrade Sample
+630221,Cotton bed linen,GB,China,2023,Import,264000000,9200000,UN Comtrade Sample
+630221,Cotton bed linen,GB,China,2024,Import,279000000,9800000,UN Comtrade Sample
+630140,Blankets and travelling rugs,GB,China,2023,Import,118000000,6400000,UN Comtrade Sample
+630140,Blankets and travelling rugs,GB,China,2024,Import,125000000,6900000,UN Comtrade Sample
+630260,Toilet and kitchen linen,GB,China,2023,Import,94000000,5200000,UN Comtrade Sample
+630260,Toilet and kitchen linen,GB,China,2024,Import,99000000,5600000,UN Comtrade Sample
+940490,Bedding articles and cushions,GB,China,2023,Import,332000000,7100000,UN Comtrade Sample
+940490,Bedding articles and cushions,GB,China,2024,Import,348000000,7500000,UN Comtrade Sample
+630221,Cotton bed linen,JP,China,2023,Import,382000000,13400000,UN Comtrade Sample
+630221,Cotton bed linen,JP,China,2024,Import,391000000,13900000,UN Comtrade Sample
+630140,Blankets and travelling rugs,JP,China,2023,Import,202000000,9800000,UN Comtrade Sample
+630140,Blankets and travelling rugs,JP,China,2024,Import,211000000,10100000,UN Comtrade Sample
+630260,Toilet and kitchen linen,JP,China,2023,Import,156000000,7300000,UN Comtrade Sample
+630260,Toilet and kitchen linen,JP,China,2024,Import,162000000,7600000,UN Comtrade Sample
+940490,Bedding articles and cushions,JP,China,2023,Import,474000000,11600000,UN Comtrade Sample
+940490,Bedding articles and cushions,JP,China,2024,Import,489000000,11900000,UN Comtrade Sample
+630221,Cotton bed linen,AU,China,2023,Import,174000000,6100000,UN Comtrade Sample
+630221,Cotton bed linen,AU,China,2024,Import,186000000,6600000,UN Comtrade Sample
+630140,Blankets and travelling rugs,AU,China,2023,Import,82000000,4100000,UN Comtrade Sample
+630140,Blankets and travelling rugs,AU,China,2024,Import,88000000,4400000,UN Comtrade Sample
+630260,Toilet and kitchen linen,AU,China,2023,Import,69000000,3600000,UN Comtrade Sample
+630260,Toilet and kitchen linen,AU,China,2024,Import,73000000,3900000,UN Comtrade Sample
+940490,Bedding articles and cushions,AU,China,2023,Import,214000000,5200000,UN Comtrade Sample
+940490,Bedding articles and cushions,AU,China,2024,Import,229000000,5600000,UN Comtrade Sample
+630221,Cotton bed linen,SG,China,2023,Import,64000000,2100000,UN Comtrade Sample
+630221,Cotton bed linen,SG,China,2024,Import,69000000,2300000,UN Comtrade Sample
+630140,Blankets and travelling rugs,SG,China,2023,Import,28000000,1600000,UN Comtrade Sample
+630140,Blankets and travelling rugs,SG,China,2024,Import,31000000,1700000,UN Comtrade Sample
+630260,Toilet and kitchen linen,SG,China,2023,Import,24000000,1300000,UN Comtrade Sample
+630260,Toilet and kitchen linen,SG,China,2024,Import,26000000,1400000,UN Comtrade Sample
+940490,Bedding articles and cushions,SG,China,2023,Import,81000000,1900000,UN Comtrade Sample
+940490,Bedding articles and cushions,SG,China,2024,Import,86000000,2100000,UN Comtrade Sample
