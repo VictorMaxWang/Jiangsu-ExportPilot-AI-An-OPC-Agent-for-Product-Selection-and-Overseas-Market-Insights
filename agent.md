@@ -6,71 +6,47 @@
 
 ## 当前总状态
 
-- 项目阶段：T00 总控文档初始化完成，等待业务脚手架开发。
-- 当前总控线程：主控开发 Agent。
-- 并行协作规则：后续任务线程只写自己的 `docs/status/Txx_xxx.md` 状态文件；`agent.md` 和 `docs/TASK_BOARD.md` 由总控线程统一合并。
-- 密钥策略：不写入真实 API Key；所有 Key 后续只允许后端从环境变量读取。
+- 当前阶段：T00-T04 已完成，R05 已完成 API 状态纠正与安全修正。
+- 当前 MVP 数据源：Bailian + World Bank + GDELT + YouTube + Etsy + CSV fallback。
+- 总控规则：`agent.md` 和 `docs/TASK_BOARD.md` 由总控线程统一合并；普通任务线程只写自己的 `docs/status/Rxx_*.md`。
+- 安全基线：真实 API Key 只能进入本机 `.env`、部署 Secret 或服务器环境变量，不得进入代码、文档、测试、README、前端、日志或报告。
+
+## 2026-05-27 API 状态纠正记录
+
+### P0 MVP 数据源
+
+- Alibaba Cloud Bailian `qwen3.6-plus`：T04 已完成后端接入，后端优先读取 `DASHSCOPE_API_KEY`，兼容 `BAILIAN_API_KEY`。
+- World Bank Indicators API：无需 Key，作为宏观市场指标数据源。
+- GDELT：无需 Key，作为新闻热度、舆情和风险信号数据源。
+- YouTube Data API v3：用户已获得 API Key，后端通过 `YOUTUBE_DATA_API_KEY` 读取，列为 P0 真实接入任务。
+- Etsy Open API：用户确认 Key 可用，后端通过 `ETSY_KEYSTRING` 和必要的 `ETSY_SHARED_SECRET` 读取，列为 P0 真实接入任务。
+- CSV fallback：T03 已完成，必须保留为演示兜底路径。
+
+### P1 可选增强
+
+- UN Comtrade：采用 no-key-first 策略，优先无 Key 调用；遇到 401、403 或限额类错误时，再尝试可选 `UN_COMTRADE_API_KEY`。
+- UN Comtrade 不得作为 MVP 主流程强依赖；失败时回落 CSV fallback 或跳过增强字段。
+
+### P2 后续扩展
+
+- eBay：暂无 Key，作为 future provider。
+- Rakuten：暂无 Key，作为 future provider。
+- Reddit：暂无 Key，作为 future provider。
 
 ## 开发波次
 
 | 波次 | 目标 | 包含任务 | 预期结果 |
 | --- | --- | --- | --- |
-| W0 | 项目总控与规范 | T00 | 明确项目目标、架构、任务板、安全规范 |
-| W1 | 基础工程骨架 | T01-T05 | 前后端、数据库、Docker、本地开发入口可运行 |
-| W2 | 数据录入与数据源 | T06-T12 | 产品录入、CSV 导入、外部数据源抽象与首批数据接入 |
-| W3 | AI 与分析能力 | T13-T17 | 百炼调用、机会评分、营销文案、看板、报告生成 |
-| W4 | 演示与交付 | T18-T22 | 配置状态页、示例数据、测试、部署文档、比赛材料 |
+| W0 | 总控与工程基础 | T00-T04 | 文档、脚手架、数据库、CSV 导入和 Bailian 接入完成。 |
+| W1 | 计划纠正与安全基线 | R05 | API 状态、任务看板、能力矩阵和敏感文件忽略规则完成。 |
+| W2 | 核心工作流与数据源基础 | R06-R13 | 产品/企业工作流、配置状态、provider 抽象层和 P0/P1 数据源接入。 |
+| W3 | AI 分析与前端呈现 | R14-R18 | 机会评分、看板、文案、报告和 fallback 演示闭环。 |
+| W4 | 交付质量与部署 | R19-R25 | Demo 脚本、测试质量、部署文档、P2 扩展设计和最终交付。 |
 
-## 总任务列表
+## 协作规则
 
-| 任务 | 名称 | 状态 | 负责人线程 | 完成情况 |
-| --- | --- | --- | --- | --- |
-| T00 | 总控文档初始化 | done | 主控开发 Agent | 已创建总控文档、架构文档、安全规范、任务看板、数据源说明和状态目录 |
-| T01 | 项目脚手架 | not_started | 待分配 | 未开始 |
-| T02 | Docker Compose | not_started | 待分配 | 未开始 |
-| T03 | 数据库模型 | not_started | 待分配 | 未开始 |
-| T04 | FastAPI 基础 | not_started | 待分配 | 未开始 |
-| T05 | 前端基础布局 | not_started | 待分配 | 未开始 |
-| T06 | 产品录入 | not_started | 待分配 | 未开始 |
-| T07 | CSV 导入 | not_started | 待分配 | 未开始 |
-| T08 | 外部 API 抽象层 | not_started | 待分配 | 未开始 |
-| T09 | World Bank 数据源 | not_started | 待分配 | 未开始 |
-| T10 | GDELT 数据源 | not_started | 待分配 | 未开始 |
-| T11 | 电商平台数据源 | not_started | 待分配 | 未开始 |
-| T12 | 社媒内容数据源 | not_started | 待分配 | 未开始 |
-| T13 | 阿里云百炼封装 | not_started | 待分配 | 未开始 |
-| T14 | 市场机会评分 | not_started | 待分配 | 未开始 |
-| T15 | 营销文案生成 | not_started | 待分配 | 未开始 |
-| T16 | 可视化看板 | not_started | 待分配 | 未开始 |
-| T17 | 出海报告生成 | not_started | 待分配 | 未开始 |
-| T18 | 管理页与配置状态 | not_started | 待分配 | 未开始 |
-| T19 | 示例数据与演示脚本 | not_started | 待分配 | 未开始 |
-| T20 | 测试与质量检查 | not_started | 待分配 | 未开始 |
-| T21 | 部署文档 | not_started | 待分配 | 未开始 |
-| T22 | 比赛交付整理 | not_started | 待分配 | 未开始 |
-
-## 任务状态规则
-
-- `not_started`：尚未开始。
-- `in_progress`：已有线程领取并正在开发。
-- `blocked`：存在外部依赖、凭证、接口或需求阻塞。
-- `done`：任务完成，已写入 `docs/status/Txx_xxx.md`，总控线程已合并状态。
-
-## 状态文件要求
-
-每个后续任务完成后，创建独立状态文件，例如：
-
-```text
-docs/status/T01_project_scaffold.md
-```
-
-状态文件必须包含：
-
-- 任务编号与名称
-- 负责人线程
-- 开始与完成时间
-- 修改目录
-- 验证命令与结果
-- 是否引入环境变量
-- 是否影响安全策略
-- 遗留问题与后续建议
+- R05 之后新任务使用 `Rxx` 编号，状态文件命名为 `docs/status/Rxx_short_description.md`。
+- P0 任务优先服务比赛 MVP；P1 任务不得阻塞 P0；P2 任务只做后续扩展准备。
+- YouTube 和 Etsy 是 P0 真实接入任务；eBay、Rakuten、Reddit 不是 MVP 阻塞项。
+- 前端只能展示配置状态，不得展示明文、部分明文、哈希、长度或可恢复掩码。
+- 本地可能存在 `cross_border_api_keys_and_docs.txt`，任何线程都不得读取、复制或输出其内容。

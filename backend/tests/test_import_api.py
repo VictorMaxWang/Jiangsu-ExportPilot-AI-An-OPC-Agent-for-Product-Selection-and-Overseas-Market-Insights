@@ -19,6 +19,53 @@ _ = _models
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SEED_DIR = PROJECT_ROOT / "data" / "seed"
+DEMO_COUNTRIES = {"US", "GB", "JP", "AU", "SG"}
+COMPETITOR_PLATFORMS = {
+    "Etsy Sample",
+    "Amazon Sample",
+    "eBay Sample",
+    "Rakuten Sample",
+    "Shopee Sample",
+    "Temu Sample",
+}
+COMPETITOR_KEYWORDS = {
+    "pet cooling mat",
+    "boho blanket",
+    "duvet cover",
+    "kids pillowcase",
+    "summer quilt",
+    "sofa throw blanket",
+    "bath towel",
+    "anti mite pillowcase",
+    "dorm room bedding",
+    "baby swaddle blanket",
+}
+CONTENT_PLATFORMS = {
+    "GDELT Sample",
+    "YouTube Sample",
+    "TikTok Sample",
+    "Pinterest Sample",
+    "Reddit Sample",
+}
+CONTENT_KEYWORDS = {
+    "bedroom makeover",
+    "home decor",
+    "pet summer care",
+    "dorm room essentials",
+    "boho bedroom",
+    "cozy room",
+    "anti allergy bedding",
+    "baby nursery",
+    "dorm room bedding",
+    "pet cooling mat",
+}
+TRADE_YEARS = {"2020", "2021", "2022", "2023", "2024"}
+TRADE_CATEGORIES = {
+    "Cotton bed linen",
+    "Blankets and travelling rugs",
+    "Toilet and kitchen linen",
+    "Bedding articles and cushions",
+}
 
 
 @pytest.fixture()
@@ -65,7 +112,7 @@ def test_seed_csv_files_exist_with_required_headers_and_rows() -> None:
             },
         },
         "competitor_samples.csv": {
-            "min_rows": 80,
+            "exact_rows": 300,
             "headers": {
                 "platform",
                 "country",
@@ -95,7 +142,7 @@ def test_seed_csv_files_exist_with_required_headers_and_rows() -> None:
             },
         },
         "trade_samples.csv": {
-            "min_rows": 20,
+            "exact_rows": 100,
             "headers": {
                 "hs_code",
                 "product_category",
@@ -109,7 +156,7 @@ def test_seed_csv_files_exist_with_required_headers_and_rows() -> None:
             },
         },
         "content_trends.csv": {
-            "min_rows": 50,
+            "exact_rows": 250,
             "headers": {
                 "platform",
                 "country",
@@ -124,7 +171,7 @@ def test_seed_csv_files_exist_with_required_headers_and_rows() -> None:
             },
         },
         "user_discussions.csv": {
-            "min_rows": 30,
+            "exact_rows": 100,
             "headers": {
                 "discussion_id",
                 "platform",
@@ -151,7 +198,10 @@ def test_seed_csv_files_exist_with_required_headers_and_rows() -> None:
             reader = csv.DictReader(csv_file)
             rows = list(reader)
         assert set(reader.fieldnames or []) >= expectation["headers"]
-        assert len(rows) >= expectation["min_rows"]
+        if "exact_rows" in expectation:
+            assert len(rows) == expectation["exact_rows"]
+        else:
+            assert len(rows) >= expectation["min_rows"]
 
     with (SEED_DIR / "product_catalog.csv").open("r", encoding="utf-8-sig", newline="") as csv_file:
         products = {row["product_name_cn"] for row in csv.DictReader(csv_file)}
@@ -170,33 +220,43 @@ def test_seed_csv_files_exist_with_required_headers_and_rows() -> None:
 
     with (SEED_DIR / "competitor_samples.csv").open("r", encoding="utf-8-sig", newline="") as csv_file:
         competitors = list(csv.DictReader(csv_file))
-    assert {
-        "eBay",
-        "Amazon Sample",
-        "Shopee Sample",
-        "Temu Sample",
-        "Etsy Sample",
-        "Rakuten Sample",
-    } <= {row["platform"] for row in competitors}
+    assert COMPETITOR_PLATFORMS == {row["platform"] for row in competitors}
+    assert DEMO_COUNTRIES == {row["country"] for row in competitors}
+    assert COMPETITOR_KEYWORDS == {row["keyword"] for row in competitors}
+    assert all(row["product_url"].startswith("https://sample.example/") for row in competitors)
+    assert all(row["image_url"].startswith("https://sample.example/") for row in competitors)
 
     with (SEED_DIR / "content_trends.csv").open("r", encoding="utf-8-sig", newline="") as csv_file:
         trends = list(csv.DictReader(csv_file))
-    assert {
-        "YouTube Sample",
-        "TikTok Sample",
-        "Pinterest Sample",
-        "Reddit Sample",
-    } <= {row["platform"] for row in trends}
-    assert {
-        "home decor",
-        "pet cooling mat",
-        "boho bedroom",
-        "dorm room bedding",
-    } <= {row["keyword"] for row in trends}
+    assert CONTENT_PLATFORMS == {row["platform"] for row in trends}
+    assert DEMO_COUNTRIES == {row["country"] for row in trends}
+    assert CONTENT_KEYWORDS == {row["keyword"] for row in trends}
+    assert all(row["url"].startswith("https://sample.example/") for row in trends)
+
+    with (SEED_DIR / "trade_samples.csv").open("r", encoding="utf-8-sig", newline="") as csv_file:
+        trade_rows = list(csv.DictReader(csv_file))
+    trade_keys = {
+        (row["reporter"], row["partner"], row["hs_code"], row["year"], row["flow"])
+        for row in trade_rows
+    }
+    assert DEMO_COUNTRIES == {row["reporter"] for row in trade_rows}
+    assert TRADE_YEARS == {row["year"] for row in trade_rows}
+    assert TRADE_CATEGORIES == {row["product_category"] for row in trade_rows}
+    assert len(trade_keys) == 100
+    assert {row["partner"] for row in trade_rows} == {"China"}
+    assert {row["flow"] for row in trade_rows} == {"Import"}
+    assert {row["source"] for row in trade_rows} == {"UN Comtrade Sample"}
+
+    with (SEED_DIR / "user_discussions.csv").open("r", encoding="utf-8-sig", newline="") as csv_file:
+        discussions = list(csv.DictReader(csv_file))
+    assert {row["discussion_id"] for row in discussions} == {f"UD{index:03d}" for index in range(1, 101)}
+    assert DEMO_COUNTRIES == {row["country"] for row in discussions}
+    assert COMPETITOR_KEYWORDS == {row["keyword"] for row in discussions}
+    assert all(row["url"].startswith("https://sample.example/") for row in discussions)
 
     with (SEED_DIR / "market_profiles.csv").open("r", encoding="utf-8-sig", newline="") as csv_file:
         profiles = list(csv.DictReader(csv_file))
-    assert {"US", "GB", "JP", "AU", "SG"} == {row["country_code"] for row in profiles}
+    assert DEMO_COUNTRIES == {row["country_code"] for row in profiles}
 
 
 def test_product_import_requires_company_id(client_with_session: tuple[TestClient, sessionmaker[Session]]) -> None:
@@ -209,6 +269,10 @@ def test_product_import_requires_company_id(client_with_session: tuple[TestClien
     assert detail["dataset"] == "products"
     assert detail["errors"][0]["field"] == "company_id"
     assert "required" in detail["errors"][0]["message"]
+
+    alias_response = client.post("/api/products/import", json={})
+    assert alias_response.status_code == 422
+    assert alias_response.json()["detail"]["errors"][0]["field"] == "company_id"
 
 
 def test_product_import_inserts_products_and_keywords(
@@ -236,16 +300,85 @@ def test_product_import_inserts_products_and_keywords(
     assert keyword_count and keyword_count >= 30
 
 
+def test_product_import_alias_validate_mode_does_not_write_products(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_with_session
+    company_id = _create_company(client)
+
+    response = client.post("/api/products/import", json={"company_id": company_id, "mode": "validate"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "validate"
+    assert payload["total_rows"] == 10
+    assert payload["valid_rows"] == 10
+    assert payload["inserted"] == 0
+
+    with session_factory() as db:
+        product_count = db.scalar(select(func.count()).select_from(_models.Product))
+    assert product_count == 0
+
+
+def test_product_import_alias_accepts_uploaded_csv(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, _session_factory = client_with_session
+    company_id = _create_company(client)
+    csv_body = (
+        "product_key,product_name_cn,product_name_en,category,cost_price_cny,weight_kg,"
+        "package_size,material,certification,moq,keywords,description\n"
+        "UP001,上传样品,Uploaded Sample,Home Textile,12.30,0.450,20x20x2cm,Cotton,OEKO-TEX,50,"
+        "uploaded sample;home textile,Uploaded CSV row\n"
+    )
+
+    response = client.post(
+        "/api/products/import",
+        data={"company_id": str(company_id), "mode": "insert"},
+        files={"file": ("uploaded_products.csv", csv_body.encode("utf-8"), "text/csv")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["file_name"] == "uploaded_products.csv"
+    assert payload["inserted"] == 1
+    products_response = client.get(f"/api/products?company_id={company_id}")
+    assert products_response.json()["total"] == 1
+
+
+def test_product_import_alias_reports_uploaded_csv_errors(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, _session_factory = client_with_session
+    company_id = _create_company(client)
+    csv_body = (
+        "product_key,product_name_cn,product_name_en,category,cost_price_cny,weight_kg,"
+        "package_size,material,certification,moq,keywords,description\n"
+        "UP002,坏数字,Bad Numbers,Home Textile,not-a-number,0.450,20x20x2cm,Cotton,OEKO-TEX,not-int,"
+        "bad sample,Bad CSV row\n"
+    )
+
+    response = client.post(
+        "/api/products/import",
+        data={"company_id": str(company_id), "mode": "insert"},
+        files={"file": ("bad_products.csv", csv_body.encode("utf-8"), "text/csv")},
+    )
+
+    assert response.status_code == 422
+    fields = {error["field"] for error in response.json()["detail"]["errors"]}
+    assert {"cost_price_cny", "moq"} <= fields
+
+
 def test_seed_import_endpoints_insert_market_demo_data(
     client_with_session: tuple[TestClient, sessionmaker[Session]],
 ) -> None:
     client, _session_factory = client_with_session
     expectations = {
-        "/api/import/competitors": 84,
+        "/api/import/competitors": 300,
         "/api/import/market-profiles": 30,
-        "/api/import/trade-samples": 40,
-        "/api/import/content-trends": 52,
-        "/api/import/user-discussions": 30,
+        "/api/import/trade-samples": 100,
+        "/api/import/content-trends": 250,
+        "/api/import/user-discussions": 100,
     }
 
     for endpoint, inserted in expectations.items():
@@ -267,8 +400,8 @@ def test_validate_mode_does_not_write_rows(
     assert response.status_code == 200
     payload = response.json()
     assert payload["mode"] == "validate"
-    assert payload["total_rows"] == 84
-    assert payload["valid_rows"] == 84
+    assert payload["total_rows"] == 300
+    assert payload["valid_rows"] == 300
     assert payload["inserted"] == 0
 
     with session_factory() as db:

@@ -5,12 +5,24 @@ from app.models import Report
 from app.schemas import ReportCreate, ReportUpdate
 
 
-def count_reports(db: Session) -> int:
-    return db.scalar(select(func.count()).select_from(Report)) or 0
+def count_reports(db: Session, *, analysis_id: int | None = None) -> int:
+    statement = select(func.count()).select_from(Report)
+    if analysis_id is not None:
+        statement = statement.where(Report.analysis_id == analysis_id)
+    return db.scalar(statement) or 0
 
 
-def list_reports(db: Session, skip: int = 0, limit: int = 100) -> list[Report]:
-    statement = select(Report).order_by(Report.id).offset(skip).limit(limit)
+def list_reports(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    *,
+    analysis_id: int | None = None,
+) -> list[Report]:
+    statement = select(Report)
+    if analysis_id is not None:
+        statement = statement.where(Report.analysis_id == analysis_id)
+    statement = statement.order_by(Report.id.desc()).offset(skip).limit(limit)
     return list(db.scalars(statement))
 
 

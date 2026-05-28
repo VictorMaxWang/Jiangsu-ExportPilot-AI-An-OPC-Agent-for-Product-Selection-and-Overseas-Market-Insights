@@ -2,6 +2,12 @@
 .env.*
 !.env.example
 
+cross_border_api_keys_and_docs.txt
+cross_border_api_env_template.txt
+*api_keys*
+*secret*
+secrets/
+
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -15,6 +21,11 @@ node_modules/
 out/
 dist/
 coverage/
+
+*.db
+*.sqlite
+*.sqlite3
+*.tsbuildinfo
 
 *.log
 .DS_Store

@@ -20,11 +20,12 @@ from app.services.ai import (
     BailianResponseError,
     BailianTimeoutError,
     BailianUpstreamError,
+    AiStructuredOutputError,
+    generate_product_keywords,
 )
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import (
     build_marketing_copy_messages,
-    build_product_keyword_messages,
     build_report_section_messages,
 )
 
@@ -55,20 +56,15 @@ async def product_keywords(
     payload: ProductKeywordsRequest,
     client: BailianClient = Depends(get_bailian_client),
 ) -> ProductKeywordsResponse:
-    messages = build_product_keyword_messages(payload.model_dump(mode="json", exclude_none=True))
     try:
-        result = await client.chat(messages, temperature=0.2, max_tokens=1200, json_mode=True)
-        parsed = parse_json_object(result.content)
-        return ProductKeywordsResponse.model_validate(parsed)
+        return await generate_product_keywords(payload, client)
     except BailianError as exc:
         raise _to_http_exception(exc) from exc
-    except AiJsonParseError as exc:
-        raise _structured_output_exception("AI_RESPONSE_PARSE_ERROR", "AI response was not valid structured JSON.") from exc
-    except ValidationError as exc:
+    except AiStructuredOutputError as exc:
         raise _structured_output_exception(
-            "AI_RESPONSE_SCHEMA_ERROR",
-            "AI response JSON did not match expected product keyword schema.",
-            errors=_safe_validation_errors(exc),
+            exc.code,
+            exc.message,
+            errors=exc.errors,
         ) from exc
 
 

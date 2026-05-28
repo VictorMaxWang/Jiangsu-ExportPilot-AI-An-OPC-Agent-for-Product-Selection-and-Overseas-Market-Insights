@@ -25,11 +25,11 @@ export function AppShell({ children }: AppShellProps) {
                 苏品智航 / Jiangsu ExportPilot
               </span>
               <span className="block truncate text-sm text-slate-500">
-                Jiangsu manufacturing export intelligence
+                面向江苏制造企业出海的 AI 选品与海外市场洞察智能体
               </span>
             </span>
           </Link>
-          <nav aria-label="Primary navigation" className="flex flex-wrap gap-2">
+          <nav aria-label="Primary navigation" className="flex flex-wrap gap-1.5">
             {navigationItems.map((item) => {
               const isActive =
                 item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
@@ -38,7 +38,7 @@ export function AppShell({ children }: AppShellProps) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`rounded-md px-3 py-2 text-sm font-medium transition ${
+                  className={`rounded-md px-2.5 py-2 text-sm font-medium transition sm:px-3 ${
                     isActive
                       ? "bg-river text-white shadow-sm"
                       : "text-slate-600 hover:bg-slate-100 hover:text-ink"

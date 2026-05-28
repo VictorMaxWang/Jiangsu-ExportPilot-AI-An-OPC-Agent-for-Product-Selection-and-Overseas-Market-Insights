@@ -4,11 +4,13 @@ export type NavigationItem = {
 };
 
 export const navigationItems: NavigationItem[] = [
-  { href: "/", label: "Home" },
-  { href: "/companies", label: "Companies" },
-  { href: "/products", label: "Products" },
-  { href: "/analysis/run", label: "Run Analysis" },
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/reports", label: "Reports" },
-  { href: "/admin/api-keys", label: "API Keys" },
+  { href: "/", label: "首页" },
+  { href: "/companies", label: "企业" },
+  { href: "/products", label: "产品" },
+  { href: "/analysis/run", label: "分析" },
+  { href: "/dashboard", label: "看板" },
+  { href: "/marketing", label: "营销" },
+  { href: "/reports", label: "报告" },
+  { href: "/admin/api-keys", label: "能力状态" },
+  { href: "/admin/data-sources", label: "数据源" },
 ];

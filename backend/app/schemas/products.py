@@ -1,7 +1,9 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.ai import ProductKeywordsResponse
 
 
 class ProductBase(BaseModel):
@@ -82,3 +84,15 @@ class ProductKeywordRead(ProductKeywordBase):
 
 class ProductKeywordListItem(ProductKeywordRead):
     pass
+
+
+class ProductKeywordGenerationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_country: str | None = None
+    target_platforms: list[str] = Field(default_factory=list)
+    persist: bool = True
+
+
+class ProductKeywordGenerationResponse(ProductKeywordsResponse):
+    saved_keywords_count: int = 0

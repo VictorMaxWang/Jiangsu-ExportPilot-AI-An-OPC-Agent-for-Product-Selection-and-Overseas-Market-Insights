@@ -1,7 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CompetitorItemBase(BaseModel):
@@ -207,3 +208,107 @@ class ContentTrendRead(ContentTrendBase):
 
 class ContentTrendListItem(ContentTrendRead):
     pass
+
+
+class WorldBankIndicatorItem(BaseModel):
+    indicator_code: str
+    indicator_name: str
+    year: int
+    value: float | None = None
+    source: Literal["api", "csv_fallback"]
+
+
+class WorldBankCountryResponse(BaseModel):
+    provider: Literal["worldbank"] = "worldbank"
+    country_code: str
+    indicators: list[WorldBankIndicatorItem]
+    fallback_used: bool = False
+
+
+class GdeltArticleItem(BaseModel):
+    title: str
+    url: str
+    domain: str | None = None
+    published_at: str | None = None
+    language: str | None = None
+    source: Literal["api", "csv_fallback"]
+
+
+class GdeltSearchResponse(BaseModel):
+    provider: Literal["gdelt"] = "gdelt"
+    query: str
+    items: list[GdeltArticleItem]
+    fallback_used: bool = False
+
+
+class YoutubeVideoItem(BaseModel):
+    platform: Literal["YouTube"] = "YouTube"
+    country: str
+    keyword: str
+    title: str
+    channel_title: str | None = None
+    published_at: str | None = None
+    thumbnail_url: str | None = None
+    video_url: str | None = None
+    description: str | None = None
+    source_type: Literal["api", "csv_fallback"]
+
+
+class YoutubeSearchResponse(BaseModel):
+    provider: Literal["youtube"] = "youtube"
+    keyword: str
+    country: str
+    items: list[YoutubeVideoItem]
+    fallback_used: bool = False
+
+
+class EtsyListingItem(BaseModel):
+    platform: Literal["Etsy"] = "Etsy"
+    country: str
+    keyword: str
+    title: str
+    price: Decimal | None = None
+    currency: str | None = None
+    image_url: str | None = None
+    product_url: str | None = None
+    category: str | None = None
+    rating: Decimal | None = None
+    review_count: int | None = None
+    source_type: Literal["api", "csv_fallback"]
+    collected_at: datetime | None = None
+
+
+class EtsySearchResponse(BaseModel):
+    provider: Literal["etsy"] = "etsy"
+    keyword: str
+    country: str
+    items: list[EtsyListingItem]
+    fallback_used: bool = False
+
+
+class UnComtradeTradeRecord(BaseModel):
+    year: int
+    trade_value_usd: Decimal | None = None
+    quantity: Decimal | None = None
+    source: Literal["api", "csv_fallback"]
+
+
+class UnComtradeTradeFlowResponse(BaseModel):
+    provider: Literal["un_comtrade"] = "un_comtrade"
+    hs_code: str
+    reporter: str
+    partner: str
+    flow: Literal["export", "import"]
+    records: list[UnComtradeTradeRecord]
+    fallback_used: bool = False
+    auth_mode: Literal["no_key", "key", "fallback"]
+
+
+class DataProviderSyncResponse(BaseModel):
+    provider: Literal["worldbank", "gdelt", "youtube", "etsy", "un_comtrade"]
+    requested: int
+    inserted: int
+    updated: int = 0
+    skipped: int = 0
+    fallback_used: bool = False
+    errors: list[str] = Field(default_factory=list)

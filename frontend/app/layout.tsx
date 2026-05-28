@@ -4,7 +4,7 @@ import { AppShell } from "./_components/AppShell";
 
 export const metadata: Metadata = {
   title: "苏品智航 / Jiangsu ExportPilot",
-  description: "AI product selection and overseas market insight platform for Jiangsu manufacturing companies.",
+  description: "面向江苏制造企业出海的 AI 选品与海外市场洞察智能体。",
 };
 
 export default function RootLayout({

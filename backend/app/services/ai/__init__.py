@@ -11,8 +11,10 @@ from app.services.ai.bailian_client import (
     BailianTimeoutError,
     BailianUpstreamError,
 )
+from app.services.ai.product_keywords import AiStructuredOutputError, generate_product_keywords
 
 __all__ = [
+    "AiStructuredOutputError",
     "BailianAuthenticationError",
     "BailianChatCompletion",
     "BailianClient",
@@ -22,4 +24,5 @@ __all__ = [
     "BailianResponseError",
     "BailianTimeoutError",
     "BailianUpstreamError",
+    "generate_product_keywords",
 ]

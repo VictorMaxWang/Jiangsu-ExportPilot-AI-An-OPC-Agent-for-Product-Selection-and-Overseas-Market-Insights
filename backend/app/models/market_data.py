@@ -1,10 +1,10 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Integer, Numeric, String, Text
+from sqlalchemy import JSON, DateTime, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, CreatedAtMixin
+from app.db.base import Base, CreatedAtMixin, TimestampMixin
 
 
 class CompetitorItem(CreatedAtMixin, Base):
@@ -85,4 +85,17 @@ class ContentTrend(CreatedAtMixin, Base):
     heat_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_style: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class YoutubeSearchCache(TimestampMixin, Base):
+    __tablename__ = "youtube_search_caches"
+    __table_args__ = (UniqueConstraint("keyword", "country", name="uq_youtube_search_caches_keyword_country"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    keyword: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    country: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    items: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 

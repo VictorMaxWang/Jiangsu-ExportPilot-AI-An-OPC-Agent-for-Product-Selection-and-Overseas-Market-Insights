@@ -1,8 +1,9 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Company, Product
+from app.models import Company, Product, ProductKeyword
 from app.schemas import ProductCreate, ProductUpdate
+from app.schemas.ai import ProductKeywordsResponse
 
 
 def company_exists(db: Session, company_id: int) -> bool:
@@ -51,3 +52,46 @@ def update_product(db: Session, product: Product, payload: ProductUpdate) -> Pro
 def delete_product(db: Session, product: Product) -> None:
     db.delete(product)
     db.commit()
+
+
+def persist_generated_keywords(
+    db: Session,
+    product: Product,
+    result: ProductKeywordsResponse,
+    *,
+    target_country: str | None = None,
+) -> int:
+    saved_count = 0
+    existing = {
+        (language or "", keyword.casefold())
+        for keyword, language in db.execute(
+            select(ProductKeyword.keyword, ProductKeyword.language).where(
+                ProductKeyword.product_id == product.id,
+            )
+        )
+    }
+
+    product.product_name_en = result.product_name_en
+    for language, keywords in (("en", result.keywords_en), ("ja", result.keywords_jp)):
+        for keyword in keywords:
+            normalized = keyword.strip()
+            if not normalized:
+                continue
+            dedupe_key = (language, normalized.casefold())
+            if dedupe_key in existing:
+                continue
+            db.add(
+                ProductKeyword(
+                    product_id=product.id,
+                    keyword=normalized,
+                    language=language,
+                    country=target_country,
+                    source="bailian",
+                )
+            )
+            existing.add(dedupe_key)
+            saved_count += 1
+
+    db.commit()
+    db.refresh(product)
+    return saved_count

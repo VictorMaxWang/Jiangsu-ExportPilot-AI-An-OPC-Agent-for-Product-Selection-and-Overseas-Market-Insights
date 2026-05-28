@@ -36,3 +36,63 @@ select,
 textarea {
   font: inherit;
 }
+
+.report-content {
+  color: #172033;
+  font-size: 0.95rem;
+  line-height: 1.75;
+}
+
+.report-content h1 {
+  margin: 0 0 1.25rem;
+  font-size: 1.7rem;
+  font-weight: 700;
+}
+
+.report-content h2 {
+  margin: 2rem 0 0.75rem;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 1.25rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.report-content p,
+.report-content ul,
+.report-content ol,
+.report-content table,
+.report-content pre {
+  margin: 0.85rem 0;
+}
+
+.report-content ul,
+.report-content ol {
+  padding-left: 1.25rem;
+}
+
+.report-content table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.report-content th,
+.report-content td {
+  border: 1px solid #e2e8f0;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.report-content th {
+  background: #f8fafc;
+  font-weight: 700;
+}
+
+.report-content pre {
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+  padding: 1rem;
+}

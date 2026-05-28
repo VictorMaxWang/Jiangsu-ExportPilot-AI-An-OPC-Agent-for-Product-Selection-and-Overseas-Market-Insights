@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CreatedAtMixin
@@ -19,8 +19,11 @@ class AnalysisRun(CreatedAtMixin, Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(String(64), nullable=False, default="pending", index=True)
+    current_step: Mapped[str | None] = mapped_column(String(128), nullable=True)
     input_products: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
     target_countries: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    step_logs: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
+    workflow_state: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -63,6 +66,12 @@ class OpportunityScore(CreatedAtMixin, Base):
     rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     risk: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fallback_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ai_fallback_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sources: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
+    evidence: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    competitor_analysis: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
 
     analysis_run: Mapped[AnalysisRun] = relationship(
         "AnalysisRun",

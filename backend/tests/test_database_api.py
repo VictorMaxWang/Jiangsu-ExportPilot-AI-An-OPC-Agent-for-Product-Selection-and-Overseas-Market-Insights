@@ -72,6 +72,22 @@ def test_create_company_and_list_it(client: TestClient) -> None:
     assert payload["total"] == 1
     assert payload["items"][0]["id"] == created["id"]
 
+    detail_response = client.get(f"/api/companies/{created['id']}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["name"] == "Jiangsu Sample Manufacturing"
+
+    update_response = client.put(
+        f"/api/companies/{created['id']}",
+        json={"industry": "Home textiles", "target_countries": ["US", "JP"]},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["industry"] == "Home textiles"
+    assert update_response.json()["target_countries"] == ["US", "JP"]
+
+    delete_response = client.delete(f"/api/companies/{created['id']}")
+    assert delete_response.status_code == 204
+    assert client.get(f"/api/companies/{created['id']}").status_code == 404
+
 
 def test_create_product_for_existing_company(client: TestClient) -> None:
     company_response = client.post(
@@ -109,6 +125,29 @@ def test_create_product_for_existing_company(client: TestClient) -> None:
     assert payload["total"] == 1
     assert payload["items"][0]["id"] == created["id"]
 
+    detail_response = client.get(f"/api/products/{created['id']}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["product_name_cn"] == "Smart Thermos"
+
+    update_response = client.put(
+        f"/api/products/{created['id']}",
+        json={"category": "Drinkware", "moq": 150},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["category"] == "Drinkware"
+    assert update_response.json()["moq"] == 150
+
+    missing_company_response = client.put(
+        f"/api/products/{created['id']}",
+        json={"company_id": 999},
+    )
+    assert missing_company_response.status_code == 404
+    assert missing_company_response.json() == {"detail": "Company not found"}
+
+    delete_response = client.delete(f"/api/products/{created['id']}")
+    assert delete_response.status_code == 204
+    assert client.get(f"/api/products/{created['id']}").status_code == 404
+
 
 def test_create_product_for_missing_company_returns_404(client: TestClient) -> None:
     response = client.post(
@@ -121,3 +160,20 @@ def test_create_product_for_missing_company_returns_404(client: TestClient) -> N
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Company not found"}
+
+
+def test_delete_company_cascades_products(client: TestClient) -> None:
+    company_response = client.post("/api/companies", json={"name": "Cascade Demo"})
+    company_id = company_response.json()["id"]
+    product_response = client.post(
+        "/api/products",
+        json={"company_id": company_id, "product_name_cn": "Cascade Product"},
+    )
+    assert product_response.status_code == 201
+
+    delete_response = client.delete(f"/api/companies/{company_id}")
+
+    assert delete_response.status_code == 204
+    products_response = client.get(f"/api/products?company_id={company_id}")
+    assert products_response.status_code == 200
+    assert products_response.json()["total"] == 0

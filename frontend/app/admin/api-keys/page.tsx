@@ -1,45 +1,17 @@
 import { PageHeader } from "../../_components/PageHeader";
 import { PlaceholderPanel } from "../../_components/PlaceholderPanel";
+import { ProviderStatusDashboard } from "../_components/ProviderStatusDashboard";
 
-const providers = [
-  "Alibaba Cloud Bailian",
-  "eBay Browse API",
-  "UN Comtrade",
-  "Rakuten Ichiba",
-  "YouTube Data API",
-  "Etsy Open API",
-  "Reddit API",
-];
-
-export default function ApiKeysPage() {
+export default function DataSourceStatusPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Backend configuration"
-        title="API keys"
-        description="Frontend screens must never expose third-party API keys. This page only shows provider configuration placeholders."
+        eyebrow="Backend Data Providers"
+        title="数据源能力状态"
+        description="只展示后端 provider 的能力状态、默认启用情况和安全测试结果；页面不展示任何凭据值、片段、长度或哈希。"
       />
-      <PlaceholderPanel title="Provider configuration status">
-        <div className="overflow-hidden rounded-lg border border-slate-200">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500">
-              <tr>
-                <th className="px-4 py-3 font-semibold">Provider</th>
-                <th className="px-4 py-3 font-semibold">Frontend status</th>
-                <th className="px-4 py-3 font-semibold">Secret handling</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 bg-white">
-              {providers.map((provider) => (
-                <tr key={provider}>
-                  <td className="px-4 py-3 font-medium text-ink">{provider}</td>
-                  <td className="px-4 py-3 text-slate-600">Backend status pending</td>
-                  <td className="px-4 py-3 text-slate-600">Server environment only</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <PlaceholderPanel title="Provider 状态">
+        <ProviderStatusDashboard />
       </PlaceholderPanel>
     </div>
   );

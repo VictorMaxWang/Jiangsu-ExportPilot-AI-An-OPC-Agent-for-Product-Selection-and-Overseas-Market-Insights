@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ReportBase(BaseModel):
@@ -35,3 +35,15 @@ class ReportRead(ReportBase):
 
 class ReportListItem(ReportRead):
     pass
+
+
+class ReportListResponse(BaseModel):
+    items: list[ReportListItem] = Field(default_factory=list)
+    total: int = Field(ge=0)
+
+
+class ReportGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_id: int = Field(ge=1)
+    force_regenerate: bool = False
