@@ -7,6 +7,7 @@ from app.schemas import MarketCompareRequest, MarketCompareResponse, MarketProfi
 from app.services.ai import BailianClient
 from app.services.analysis import MarketProfileAnalysisService
 from app.services.data_sources import DataSourceService, get_data_source_service
+from app.utils.redaction import redact_text
 
 
 router = APIRouter()
@@ -35,7 +36,7 @@ async def get_country_profile(
             hs_code=hs_code,
         )
     except ValueError as exc:
-        raise _validation_exception(str(exc)) from exc
+        raise _validation_exception(redact_text(str(exc)) or "") from exc
 
 
 @router.post("/compare", response_model=MarketCompareResponse)
@@ -51,7 +52,7 @@ async def compare_markets(
             hs_code=request.hs_code,
         )
     except ValueError as exc:
-        raise _validation_exception(str(exc)) from exc
+        raise _validation_exception(redact_text(str(exc)) or "") from exc
 
 
 def _validation_exception(message: str) -> HTTPException:

@@ -26,7 +26,7 @@ import {
 } from "../../_lib/api-client";
 
 const DEMO_SOURCE_NOTICE =
-  "当前 Demo 使用 World Bank、GDELT、YouTube、Etsy、UN Comtrade/样本数据与 CSV fallback；平台竞品样本不代表真实销量。";
+  "当前 Demo 使用公开 API、缓存、样本数据与 CSV fallback。竞品样本不代表真实销量，仅作为价格与内容信号。";
 
 type DashboardDetailWorkspaceProps = {
   analysisId: number;
@@ -108,7 +108,7 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
   if (!dashboard) {
     return (
       <EmptyState
-        title="未找到分析结果"
+        title="请先运行一次分析"
         description="请先在运行分析页选择企业、产品和目标国家，待工作流完成后查看市场看板。"
         action={
           <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/analysis/run">
@@ -135,6 +135,12 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
             查看出海报告
           </Link>
           <Link
+            className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700"
+            href={`/marketing?analysis_id=${dashboard.analysis_id}`}
+          >
+            生成营销文案
+          </Link>
+          <Link
             className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700"
             href="/analysis/run"
           >
@@ -157,8 +163,8 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
       {dashboard.product_scores.length === 0 ? (
         <div className="mt-5">
           <EmptyState
-            title="暂无评分条目"
-            description="当前分析还没有落库的机会评分。请等待智能体工作流完成，或重新运行分析。"
+            title="请先运行一次分析"
+            description="当前分析还没有可展示的机会评分。请等待智能体工作流完成，或重新运行分析。"
             action={
               <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/analysis/run">
                 运行分析
@@ -196,6 +202,7 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
               <ChartPanel
                 title="产品机会评分"
                 description="按产品与国家组合展示 total_score。"
+                sourceNote="数据源：后端 OpportunityScore 聚合公开 API、CSV fallback、内容趋势与贸易样本后生成。"
                 isEmpty={dashboard.product_scores.length === 0}
               >
                 <ScoreRankingBarChart items={dashboard.product_scores} />
@@ -204,6 +211,7 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
               <ChartPanel
                 title="国家推荐评分"
                 description="按国家聚合平均分和最高分。"
+                sourceNote="数据源：本次 analysis_id 下的评分结果按国家聚合，仅用于演示市场优先级。"
                 isEmpty={dashboard.country_scores.length === 0}
               >
                 <CountryRecommendationChart items={dashboard.country_scores} />
@@ -212,14 +220,17 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
               <ChartPanel
                 title="竞品价格区间"
                 description="展示公开 API 或样本竞品的最低价、中位价和最高价。"
+                sourceNote="数据源：Etsy/平台样本与 competitor_samples.csv；竞品样本不代表真实销量，仅作为价格与内容信号。"
                 isEmpty={dashboard.price_ranges.length === 0}
               >
                 <CompetitorPriceRangeChart items={dashboard.price_ranges} />
+                <PriceNoticeList items={dashboard.price_ranges} />
               </ChartPanel>
 
               <ChartPanel
                 title="内容趋势标签云"
                 description="来自 R17 content_trends 工作流状态；没有趋势主题时不编造标签。"
+                sourceNote="数据源：YouTube、讨论样本、内容趋势 CSV fallback 与 AI/规则解析结果。"
                 isEmpty={dashboard.content_themes.length === 0}
                 emptyTitle="暂无趋势主题"
                 emptyDescription="当前分析没有可展示的 content_themes。"
@@ -327,6 +338,25 @@ function SourcesPanel({ items }: { items: DashboardDataSourceUsed[] }) {
         )}
       </div>
     </section>
+  );
+}
+
+function PriceNoticeList({ items }: { items: DashboardPriceRange[] }) {
+  const notices = items
+    .map((item) => item.sample_notice || item.price_suggestion)
+    .filter((notice): notice is string => Boolean(notice))
+    .slice(0, 3);
+  if (notices.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-3 grid gap-2">
+      {notices.map((notice, index) => (
+        <p key={`${notice}-${index}`} className="rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+          {notice}
+        </p>
+      ))}
+    </div>
   );
 }
 

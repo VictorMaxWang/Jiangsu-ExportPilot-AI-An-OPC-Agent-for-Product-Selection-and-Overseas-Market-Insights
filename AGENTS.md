@@ -15,7 +15,8 @@ Build an AI product selection and overseas market insight platform for Jiangsu m
 - Database: PostgreSQL
 - AI: Alibaba Cloud Bailian `qwen3.6-plus`
 - Deployment: Docker Compose, Tencent Cloud CVM, Nginx
-- Data sources: World Bank, GDELT, eBay Browse API, UN Comtrade, Rakuten Ichiba, YouTube Data API, Etsy Open API, Reddit API, CSV fallback
+- Runtime data sources: Alibaba Cloud Bailian, World Bank, GDELT, YouTube Data API, Etsy Open API, UN Comtrade, CSV fallback
+- Future P2 data sources: eBay Browse API, Rakuten Ichiba, Reddit API
 
 ## Expected Directory Structure
 
@@ -33,8 +34,7 @@ Build an AI product selection and overseas market insight platform for Jiangsu m
 ├── frontend/
 ├── backend/
 ├── data/
-│   ├── samples/
-│   └── fallback/
+│   └── seed/
 ├── deploy/
 ├── scripts/
 └── tests/
@@ -45,21 +45,21 @@ Do not create unrelated top-level directories without updating the architecture 
 ## Coordination Rules
 
 - `agent.md` and `docs/TASK_BOARD.md` are master control documents. Avoid editing them from parallel task threads unless you are the control thread.
-- Each implementation task must write a separate status file under `docs/status/`, for example `docs/status/T01_project_scaffold.md`.
+- Each implementation task must write a separate status file under `docs/status/`, for example `docs/status/T01_project_scaffold.md` or `docs/status/Q01_project_consistency_audit.md`.
 - A task status file should include: task id, owner thread, start time, end time, changed paths, test results, blockers, and follow-up notes.
 - Parallel tasks must not edit the same source files unless the control thread explicitly coordinates the dependency.
-- Prefer small, reviewable changes. Keep each task aligned with its assigned Txx scope.
+- Prefer small, reviewable changes. Keep each task aligned with its assigned Txx/Rxx/Qxx scope.
 
 ## Naming Rules
 
-- Task ids: `T00` through `T22`.
+- Task ids: `T00` through `T04`, `R05` through `R21`, and `Q01` onward for final control, quality, deployment, and delivery tasks.
 - Backend Python modules: `snake_case`.
 - Frontend components: `PascalCase`.
 - Frontend hooks: `useCamelCase`.
 - API route paths: kebab-case or stable REST-style nouns, for example `/api/market-insights`.
 - Database tables: `snake_case` plural nouns, for example `market_scores`.
 - Environment variables: `UPPER_SNAKE_CASE`.
-- Status files: `Txx_short_description.md`, for example `T13_bailian_client.md`.
+- Status files: `Txx_short_description.md`, `Rxx_short_description.md`, or `Qxx_short_description.md`, for example `Q01_project_consistency_audit.md`.
 
 ## Security Requirements
 
@@ -78,14 +78,22 @@ Use descriptive backend-only variable names. Expected examples:
 
 ```text
 DATABASE_URL=
+REDIS_URL=
+DASHSCOPE_API_KEY=
 BAILIAN_API_KEY=
+BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 BAILIAN_MODEL=qwen3.6-plus
+YOUTUBE_DATA_API_KEY=
+ENABLE_YOUTUBE=true
+ENABLE_ETSY=true
+ENABLE_UN_COMTRADE=true
+ETSY_KEYSTRING=
+ETSY_SHARED_SECRET=
+UN_COMTRADE_API_KEY=
 EBAY_CLIENT_ID=
 EBAY_CLIENT_SECRET=
-UN_COMTRADE_API_KEY=
 RAKUTEN_APP_ID=
-YOUTUBE_API_KEY=
-ETSY_API_KEY=
+RAKUTEN_APPLICATION_ID=
 REDDIT_CLIENT_ID=
 REDDIT_CLIENT_SECRET=
 ```
@@ -107,8 +115,8 @@ Values must appear only in local `.env` files, deployment secret stores, or serv
 
 - Backend: add focused tests for services, API clients, scoring logic, and report generation.
 - Frontend: test core user flows and key components when behavior is non-trivial.
-- Integration: include sample CSV import, fallback data path, AI mock path, and dashboard rendering path.
-- Before marking a task done, run the smallest relevant checks and record results in that task's `docs/status/Txx_*.md`.
+- Integration: include sample CSV import, seed fallback data path, AI mock path, and dashboard rendering path.
+- Before marking a task done, run the smallest relevant checks and record results in that task's `docs/status/*_*.md`.
 
 ## Git and Commit Requirements
 

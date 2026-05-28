@@ -202,7 +202,7 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
       <section className="mt-5 rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-ink">Report list</h2>
-          {activeAnalysisId ? <span className="text-sm text-slate-500">Filtered by analysis #{activeAnalysisId}</span> : null}
+          {activeAnalysisId ? <span className="text-sm text-slate-500">当前仅显示 analysis_id = {activeAnalysisId} 的报告</span> : null}
         </div>
         <div className="mt-4">
           {loading ? (
@@ -247,7 +247,9 @@ function ReportCard({ report, copied, onCopy }: { report: Report; copied: boolea
           <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
             <span className="rounded-md bg-white px-2 py-1 text-slate-600">Markdown {report.content_markdown ? "ready" : "missing"}</span>
             <span className="rounded-md bg-white px-2 py-1 text-slate-600">HTML {report.content_html ? "ready" : "missing"}</span>
-            <span className="rounded-md bg-white px-2 py-1 text-slate-600">PDF {report.pdf_url ? "ready" : "pending"}</span>
+            <span className="rounded-md bg-white px-2 py-1 text-slate-600">
+              PDF {report.pdf_url ? "ready" : "部署版开启"}
+            </span>
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -261,7 +263,7 @@ function ReportCard({ report, copied, onCopy }: { report: Report; copied: boolea
             Dashboard
           </Link>
           <button className="cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-400" disabled type="button">
-            PDF pending
+            PDF 导出将在部署版开启；当前支持 Markdown/HTML 报告。
           </button>
         </div>
       </div>

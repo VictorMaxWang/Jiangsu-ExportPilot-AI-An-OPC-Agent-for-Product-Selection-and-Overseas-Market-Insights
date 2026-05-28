@@ -3,15 +3,17 @@ import { PlaceholderPanel } from "../../_components/PlaceholderPanel";
 import { ProviderStatusDashboard } from "../_components/ProviderStatusDashboard";
 
 export default function DataSourceStatusPage() {
+  const requireAdminPassword = process.env.APP_ENV === "production";
+
   return (
     <div>
       <PageHeader
         eyebrow="Backend Data Providers"
         title="数据源能力状态"
-        description="只展示后端 provider 的能力状态、默认启用情况和安全测试结果；页面不展示任何凭据值、片段、长度或哈希。"
+        description="这里只显示配置状态，不显示密钥；生产环境需要 Admin Password，前端不会持久化保存密码。"
       />
       <PlaceholderPanel title="Provider 状态">
-        <ProviderStatusDashboard />
+        <ProviderStatusDashboard requireAdminPassword={requireAdminPassword} />
       </PlaceholderPanel>
     </div>
   );

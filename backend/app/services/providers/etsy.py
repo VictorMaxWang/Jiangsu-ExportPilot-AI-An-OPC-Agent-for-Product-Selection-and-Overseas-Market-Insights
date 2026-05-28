@@ -17,6 +17,7 @@ from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE, DataProvider
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_SEED_DIR = PROJECT_ROOT / "data" / "seed"
 DEFAULT_ENDPOINT = "https://api.etsy.com/v3/application/listings/active"
+DEFAULT_PING_ENDPOINT = "https://api.etsy.com/v3/application/openapi-ping"
 MAX_ETSY_RESULTS = 20
 ETSY_PLATFORM = "Etsy"
 ETSY_SAMPLE_PLATFORM = "Etsy Sample"
@@ -65,8 +66,17 @@ FALLBACK_KEYWORD_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+ETSY_CREDENTIALS_INVALID_OR_UNAPPROVED = "ETSY_CREDENTIALS_INVALID_OR_UNAPPROVED"
+ETSY_LISTINGS_REQUIRES_OAUTH_OR_APPROVAL = "credentials_valid_but_listing_search_requires_oauth_or_approval"
+ETSY_LIVE_SEARCH_FAILED = "ETSY_LIVE_SEARCH_FAILED"
+ETSY_NOT_CONFIGURED = "ETSY_NOT_CONFIGURED"
+ETSY_DISABLED = "ETSY_DISABLED"
+
+
 class _EtsyApiError(Exception):
-    pass
+    def __init__(self, message: str, *, code: str = ETSY_LIVE_SEARCH_FAILED) -> None:
+        self.code = code
+        super().__init__(message)
 
 
 class EtsyProvider:
@@ -75,6 +85,7 @@ class EtsyProvider:
         *,
         settings: Settings | None = None,
         endpoint: str = DEFAULT_ENDPOINT,
+        ping_endpoint: str = DEFAULT_PING_ENDPOINT,
         timeout_seconds: float = 15.0,
         transport: httpx.AsyncBaseTransport | None = None,
         seed_dir: Path | None = None,
@@ -82,6 +93,7 @@ class EtsyProvider:
     ) -> None:
         self._settings = settings or get_settings()
         self._endpoint = endpoint
+        self._ping_endpoint = ping_endpoint
         self._timeout_seconds = timeout_seconds
         self._transport = transport
         self._seed_dir = seed_dir or DEFAULT_SEED_DIR
@@ -92,13 +104,22 @@ class EtsyProvider:
         keyword: str,
         country: str = "US",
         limit: int = MAX_ETSY_RESULTS,
+        *,
+        allow_fallback: bool = True,
     ) -> EtsySearchResponse:
         normalized_keyword = normalize_keyword(keyword)
         normalized_country = normalize_country(country)
         safe_limit = clamp_limit(limit)
         collected_at = self._clock()
 
-        if not self._settings.enable_etsy or not self._settings.etsy_keystring or not self._settings.etsy_shared_secret:
+        if not self._settings.enable_etsy:
+            if not allow_fallback:
+                raise _EtsyApiError("Etsy provider is disabled", code=ETSY_DISABLED)
+            return self._fallback_search(normalized_keyword, normalized_country, safe_limit)
+
+        if not self._settings.etsy_keystring or not self._settings.etsy_shared_secret:
+            if not allow_fallback:
+                raise _EtsyApiError("Etsy credentials are not configured", code=ETSY_NOT_CONFIGURED)
             return self._fallback_search(normalized_keyword, normalized_country, safe_limit)
 
         try:
@@ -110,7 +131,29 @@ class EtsyProvider:
                 fallback_used=False,
             )
         except _EtsyApiError:
+            if not allow_fallback:
+                raise
             return self._fallback_search(normalized_keyword, normalized_country, safe_limit)
+
+    async def openapi_ping(self) -> bool:
+        if not self._settings.enable_etsy:
+            raise _EtsyApiError("Etsy provider is disabled", code=ETSY_DISABLED)
+        if not self._settings.etsy_keystring or not self._settings.etsy_shared_secret:
+            raise _EtsyApiError("Etsy credentials are not configured", code=ETSY_NOT_CONFIGURED)
+
+        timeout = httpx.Timeout(self._timeout_seconds, connect=5.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
+                response = await client.get(self._ping_endpoint, headers=self._auth_headers())
+        except httpx.HTTPError as exc:
+            raise _EtsyApiError("Etsy ping request failed", code=ETSY_LIVE_SEARCH_FAILED) from exc
+
+        if response.status_code >= 400:
+            raise _EtsyApiError(
+                "Etsy credentials could not be validated",
+                code=ETSY_CREDENTIALS_INVALID_OR_UNAPPROVED,
+            )
+        return True
 
     async def _fetch_api_items(
         self,
@@ -131,10 +174,7 @@ class EtsyProvider:
         if currency:
             params["currency"] = currency
 
-        headers = {
-            "Accept": "application/json",
-            "x-api-key": f"{self._settings.etsy_keystring}:{self._settings.etsy_shared_secret}",
-        }
+        headers = self._auth_headers()
         timeout = httpx.Timeout(self._timeout_seconds, connect=5.0)
         try:
             async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
@@ -143,7 +183,12 @@ class EtsyProvider:
             raise _EtsyApiError("Etsy request failed") from exc
 
         if response.status_code >= 400:
-            raise _EtsyApiError("Etsy returned an error status")
+            code = (
+                ETSY_LISTINGS_REQUIRES_OAUTH_OR_APPROVAL
+                if response.status_code in {401, 403} or _body_suggests_oauth_or_approval(response)
+                else ETSY_LIVE_SEARCH_FAILED
+            )
+            raise _EtsyApiError("Etsy returned an error status", code=code)
 
         try:
             payload = response.json()
@@ -173,6 +218,21 @@ class EtsyProvider:
             items=items,
             fallback_used=True,
         )
+
+    def _auth_headers(self) -> dict[str, str]:
+        return {
+            "Accept": "application/json",
+            "x-api-key": f"{self._settings.etsy_keystring}:{self._settings.etsy_shared_secret}",
+        }
+
+
+def _body_suggests_oauth_or_approval(response: httpx.Response) -> bool:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = response.text
+    text = str(payload).casefold()
+    return any(marker in text for marker in ("oauth", "approval", "approve", "access", "permission"))
 
 
 def normalize_keyword(keyword: str) -> str:

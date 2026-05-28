@@ -165,7 +165,12 @@ export type ProviderCapabilityStatus =
   | "unavailable";
 
 export type ProviderMvpPriority = "P0" | "P1" | "P2";
-export type ProviderTestStatus = "success" | "fallback" | "pending" | "unavailable";
+export type ProviderTestStatus =
+  | "success"
+  | "fallback"
+  | "pending"
+  | "unavailable"
+  | "credentials_valid_but_listing_search_requires_oauth_or_approval";
 
 export type ProviderStatusItem = {
   provider: ProviderId;
@@ -190,6 +195,16 @@ export type ProviderTestResponse = {
   message: string;
   sample_count: number;
   error_code: string | null;
+  configured: boolean;
+  live_ping_success: boolean | null;
+  live_search_success: boolean | null;
+  fallback_available: boolean;
+  cache_bypassed: boolean;
+  auth_mode: "no_key" | "key" | "fallback" | null;
+};
+
+export type AdminRequestOptions = {
+  adminPassword?: string;
 };
 
 export type AnalysisWorkflowStatus =
@@ -494,13 +509,20 @@ export async function generateProductKeywords(
   });
 }
 
-export async function listProviderStatuses(): Promise<ProviderStatusResponse> {
-  return requestJson<ProviderStatusResponse>("/api/admin/providers/status");
+export async function listProviderStatuses(options: AdminRequestOptions = {}): Promise<ProviderStatusResponse> {
+  return requestJson<ProviderStatusResponse>("/api/admin/providers/status", {
+    headers: buildAdminHeaders(options),
+  });
 }
 
-export async function testProvider(provider: ProviderId): Promise<ProviderTestResponse> {
-  return requestJson<ProviderTestResponse>(`/api/admin/providers/test/${provider}`, {
+export async function testProvider(
+  provider: ProviderId,
+  options: AdminRequestOptions & { forceLive?: boolean } = {},
+): Promise<ProviderTestResponse> {
+  const query = options.forceLive ? "?force_live=true" : "";
+  return requestJson<ProviderTestResponse>(`/api/admin/providers/test/${provider}${query}`, {
     method: "POST",
+    headers: buildAdminHeaders(options),
   });
 }
 
@@ -661,11 +683,14 @@ async function parseErrorResponse(response: Response): Promise<unknown> {
 }
 
 function buildErrorMessage(status: number, detail: unknown): string {
+  if (status === 401) {
+    return "Admin Password 无效或缺失。";
+  }
   if (isRecord(detail)) {
     const nested = detail.detail;
     if (isRecord(nested)) {
       if (nested.code === "BAILIAN_NOT_CONFIGURED") {
-        return "Bailian is not configured. Set backend BAILIAN_API_KEY or DASHSCOPE_API_KEY.";
+        return "Bailian is not configured on the backend.";
       }
       if (typeof nested.message === "string") {
         return nested.message;
@@ -689,4 +714,11 @@ function buildErrorMessage(status: number, detail: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function buildAdminHeaders(options: AdminRequestOptions): HeadersInit {
+  if (!options.adminPassword) {
+    return {};
+  }
+  return { "X-Admin-Password": options.adminPassword };
 }

@@ -55,6 +55,7 @@ export function MarketingWorkspace() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [aiFallbackNotice, setAiFallbackNotice] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -69,16 +70,25 @@ export function MarketingWorkspace() {
     setLoadingAnalysis(true);
     setError(null);
     setNotice(null);
+    setAiFallbackNotice(null);
     try {
       const detail = await getAnalysisDetail(analysisId);
       setAnalysisDetail(detail);
-      const firstScore = detail.scores[0] ?? null;
-      if (firstScore) {
-        setSelectedScoreKey(scoreKey(firstScore, 0));
-        setForm(formFromScore(firstScore, detail));
-        setNotice(`Analysis #${analysisId} loaded with ${detail.scores.length} score rows.`);
+      const topEntry = topScoreEntry(detail.scores);
+      if (topEntry) {
+        const nextForm = formFromScore(topEntry.score, detail);
+        const asset = matchingMarketingAsset(topEntry.score, detail);
+        setSelectedScoreKey(scoreKey(topEntry.score, topEntry.index));
+        setForm(nextForm);
+        setResult(asset ? marketingResultFromAsset(asset, nextForm) : null);
+        setNotice(
+          asset
+            ? `Analysis #${analysisId} 已加载，并自动展示 top recommendation 的随分析营销草稿。`
+            : `Analysis #${analysisId} 已加载，并自动填入 top recommendation。`,
+        );
       } else {
         setSelectedScoreKey("");
+        setResult(null);
         setNotice(`Analysis #${analysisId} loaded, but no score rows were found.`);
       }
     } catch (requestError) {
@@ -104,7 +114,7 @@ export function MarketingWorkspace() {
     }
     return (
       analysisDetail.scores.find((score, index) => scoreKey(score, index) === selectedScoreKey) ??
-      analysisDetail.scores[0] ??
+      topScoreEntry(analysisDetail.scores)?.score ??
       null
     );
   }, [analysisDetail, selectedScoreKey]);
@@ -115,9 +125,12 @@ export function MarketingWorkspace() {
     setSelectedScoreKey(value);
     const score = analysisDetail?.scores.find((item, index) => scoreKey(item, index) === value) ?? null;
     if (score && analysisDetail) {
-      setForm(formFromScore(score, analysisDetail));
-      setResult(null);
-      setNotice("Analysis row loaded into the generator.");
+      const nextForm = formFromScore(score, analysisDetail);
+      const asset = matchingMarketingAsset(score, analysisDetail);
+      setForm(nextForm);
+      setResult(asset ? marketingResultFromAsset(asset, nextForm) : null);
+      setAiFallbackNotice(null);
+      setNotice(asset ? "Loaded the saved marketing draft for this analysis row." : "Analysis row loaded into the generator.");
     }
   }
 
@@ -126,6 +139,7 @@ export function MarketingWorkspace() {
     setError(null);
     setNotice(null);
     setCopyError(null);
+    setAiFallbackNotice(null);
 
     const normalizedCountry = form.country.trim().toUpperCase();
     if (!form.product.trim()) {
@@ -155,7 +169,10 @@ export function MarketingWorkspace() {
       setForm((current) => ({ ...current, country: normalizedCountry }));
       setNotice(mode === "analysis" ? "Draft generated and saved to the analysis state." : "Draft generated.");
     } catch (requestError) {
-      setError(getFriendlyErrorMessage(requestError));
+      const message = getFriendlyErrorMessage(requestError);
+      setAiFallbackNotice(
+        `AI 实时生成暂时不可用：${message}。如果右侧已有随分析生成的营销草稿，可直接复制；否则可使用已自动填入的 top recommendation 信息继续讲解。`,
+      );
     } finally {
       setGenerating(false);
     }
@@ -256,6 +273,13 @@ export function MarketingWorkspace() {
         </Panel>
 
         {notice ? <p className="rounded-lg border border-jade/30 bg-jade/10 p-4 text-sm font-medium text-jade">{notice}</p> : null}
+        {aiFallbackNotice ? (
+          <FallbackNotice
+            source="mock"
+            title="营销生成已切换为演示说明"
+            description={aiFallbackNotice}
+          />
+        ) : null}
         {error ? <ErrorState message={error} /> : null}
       </section>
 
@@ -379,6 +403,57 @@ function OutputBlock({
   );
 }
 
+function topScoreEntry(scores: AnalysisScoreItem[]): { score: AnalysisScoreItem; index: number } | null {
+  if (scores.length === 0) {
+    return null;
+  }
+  return scores
+    .map((score, index) => ({ score, index }))
+    .sort((left, right) => {
+      const leftRank = left.score.rank ?? Number.MAX_SAFE_INTEGER;
+      const rightRank = right.score.rank ?? Number.MAX_SAFE_INTEGER;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+      return scoreNumber(right.score.total_score) - scoreNumber(left.score.total_score);
+    })[0] ?? null;
+}
+
+function matchingMarketingAsset(score: AnalysisScoreItem, detail: AnalysisDetailResponse): Record<string, unknown> | null {
+  const assets = toRecordArray(detail.workflow_state.marketing_assets);
+  return (
+    assets.find((asset) => {
+      const assetScoreId = Number(asset.score_id);
+      if (score.id && assetScoreId === score.id) {
+        return true;
+      }
+      const assetProductId = Number(asset.product_id);
+      const assetCountry = readString(asset.country).toUpperCase();
+      const assetProduct = readString(asset.product).toLowerCase();
+      const scoreProduct = (score.product_name_en || score.product_name_cn || score.keyword).toLowerCase();
+      return assetCountry === score.country.toUpperCase() && (assetProductId === score.product_id || assetProduct === scoreProduct);
+    }) ?? null
+  );
+}
+
+function marketingResultFromAsset(asset: Record<string, unknown>, fallbackForm: FormState): MarketingGenerateResponse {
+  const seoKeywords = toStringArray(asset.seo_keywords);
+  const socialPosts = toStringArray(asset.social_posts);
+  const localizationNotes = toStringArray(asset.localization_notes);
+  const riskNotes = toStringArray(asset.risk_notes);
+  const shortDescription = readString(asset.short_description);
+  const adCopy = readString(asset.ad_copy);
+  return {
+    title: readString(asset.title) || readString(asset.listing_title) || fallbackForm.product,
+    bullet_points: toStringArray(asset.bullet_points),
+    seo_keywords: seoKeywords,
+    short_video_script: readString(asset.short_video_script) || [shortDescription, ...socialPosts].filter(Boolean).join("\n"),
+    pinterest_keywords: toStringArray(asset.pinterest_keywords).length > 0 ? toStringArray(asset.pinterest_keywords) : seoKeywords,
+    platform_listing_advice: readString(asset.platform_listing_advice) || [adCopy, ...localizationNotes].filter(Boolean).join("\n"),
+    risk_notes: riskNotes.length > 0 ? riskNotes : splitList(fallbackForm.riskNotes),
+  };
+}
+
 function formFromScore(score: AnalysisScoreItem, detail: AnalysisDetailResponse): FormState {
   const trend = matchingTrend(score, detail);
   const competitor = score.competitor_analysis;
@@ -482,6 +557,11 @@ function toStringArray(value: unknown): string[] {
 
 function readString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function scoreNumber(value: string | number | null): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function dedupeStrings(values: string[]): string[] {

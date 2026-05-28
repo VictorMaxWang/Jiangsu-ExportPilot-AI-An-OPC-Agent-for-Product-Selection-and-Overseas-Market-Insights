@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Generator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -11,9 +11,14 @@ from app.core.config import get_settings
 from app.db.base import Base
 from app.models import ApiCallLog, DataSourceCache
 from app.schemas import (
+    EtsyListingItem,
+    EtsySearchResponse,
     GdeltSearchResponse,
+    UnComtradeTradeFlowResponse,
+    UnComtradeTradeRecord,
     WorldBankCountryResponse,
     YoutubeSearchResponse,
+    YoutubeVideoItem,
 )
 from app.services.data_sources import DataSourceService
 
@@ -82,6 +87,140 @@ def test_youtube_fallback_is_cached_and_logs_cache_hit(db_session: Session) -> N
     assert provider.calls == 1
     assert _cache_providers(db_session) == {"youtube"}
     assert _log_statuses(db_session) == ["fallback", "cache_hit"]
+
+
+def test_force_live_bypasses_fresh_youtube_cache(db_session: Session) -> None:
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        DataSourceCache(
+            provider="youtube",
+            endpoint="search_video_trends",
+            query="home decor",
+            country="US",
+            response_payload={
+                "provider": "youtube",
+                "keyword": "home decor",
+                "country": "US",
+                "items": [
+                    {
+                        "country": "US",
+                        "keyword": "home decor",
+                        "title": "cached fallback video",
+                        "source_type": "csv_fallback",
+                    }
+                ],
+                "fallback_used": True,
+            },
+            fallback_used=True,
+            source="csv_fallback",
+            fetched_at=now,
+            expires_at=now + timedelta(hours=1),
+        )
+    )
+    db_session.commit()
+
+    provider = LiveYoutubeProvider()
+    service = DataSourceService(db_session, youtube_provider=provider)
+
+    result = asyncio.run(service.search_video_trends("home decor", country="US", limit=1, force_live=True))
+
+    assert result.fallback_used is False
+    assert result.items[0].title == "live home decor video"
+    assert provider.calls == 1
+    cache = db_session.scalar(select(DataSourceCache).where(DataSourceCache.provider == "youtube"))
+    assert cache is not None
+    assert cache.response_payload["items"][0]["title"] == "live home decor video"
+    assert _log_statuses(db_session) == ["success"]
+
+
+def test_force_live_bypasses_fresh_etsy_cache(db_session: Session) -> None:
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        DataSourceCache(
+            provider="etsy",
+            endpoint="search_competitors",
+            query="home decor",
+            country="US",
+            response_payload={
+                "provider": "data_source_service",
+                "source_provider": "etsy",
+                "keyword": "home decor",
+                "country": "US",
+                "items": [
+                    {
+                        "platform": "Etsy",
+                        "country": "US",
+                        "keyword": "home decor",
+                        "title": "cached fallback listing",
+                        "source_type": "csv_fallback",
+                    }
+                ],
+                "fallback_used": True,
+                "sources": ["Etsy Sample"],
+            },
+            fallback_used=True,
+            source="csv_fallback",
+            fetched_at=now,
+            expires_at=now + timedelta(hours=1),
+        )
+    )
+    db_session.commit()
+
+    provider = LiveEtsyProvider()
+    service = DataSourceService(db_session, etsy_provider=provider)
+
+    result = asyncio.run(service.search_competitors("home decor", country="US", limit=1, force_live=True))
+
+    assert result.fallback_used is False
+    assert result.items[0].title == "live etsy listing"
+    assert provider.calls == 1
+    cache = db_session.scalar(select(DataSourceCache).where(DataSourceCache.provider == "etsy"))
+    assert cache is not None
+    assert cache.response_payload["items"][0]["title"] == "live etsy listing"
+    assert _log_statuses(db_session) == ["success"]
+
+
+def test_force_live_bypasses_fresh_un_comtrade_cache(db_session: Session) -> None:
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        DataSourceCache(
+            provider="un_comtrade",
+            endpoint="trade_data",
+            query="category:cotton bedding|hs:630221",
+            country="US",
+            response_payload={
+                "provider": "un_comtrade",
+                "hs_code": "630221",
+                "reporter": "CHN",
+                "partner": "US",
+                "flow": "export",
+                "records": [{"year": 2023, "trade_value_usd": "1", "quantity": "1", "source": "csv_fallback"}],
+                "fallback_used": True,
+                "auth_mode": "fallback",
+            },
+            fallback_used=True,
+            source="csv_fallback",
+            fetched_at=now,
+            expires_at=now + timedelta(hours=1),
+        )
+    )
+    db_session.commit()
+
+    provider = LiveUnComtradeProvider()
+    service = DataSourceService(db_session, un_comtrade_provider=provider)
+
+    result = asyncio.run(
+        service.get_trade_data("cotton bedding", hs_code="630221", country="US", force_live=True)
+    )
+
+    assert result.fallback_used is False
+    assert result.auth_mode == "no_key"
+    assert result.records[0].trade_value_usd == Decimal("999")
+    assert provider.calls == 1
+    cache = db_session.scalar(select(DataSourceCache).where(DataSourceCache.provider == "un_comtrade"))
+    assert cache is not None
+    assert cache.response_payload["records"][0]["trade_value_usd"] == "999"
+    assert _log_statuses(db_session) == ["success"]
 
 
 def test_etsy_fallback_uses_full_competitor_samples_and_is_cached(db_session: Session) -> None:
@@ -200,6 +339,33 @@ class FailingYoutubeProvider:
         raise RuntimeError("youtube x-api-key fake-key unavailable")
 
 
+class LiveYoutubeProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def search_videos(
+        self,
+        keyword: str,
+        country: str = "US",
+        max_results: int = 10,
+    ) -> YoutubeSearchResponse:
+        self.calls += 1
+        return YoutubeSearchResponse(
+            keyword=keyword,
+            country=country,
+            items=[
+                YoutubeVideoItem(
+                    country=country,
+                    keyword=keyword,
+                    title="live home decor video",
+                    video_url="https://www.youtube.com/watch?v=live",
+                    source_type="api",
+                )
+            ],
+            fallback_used=False,
+        )
+
+
 class FailingEtsyProvider:
     def __init__(self) -> None:
         self.calls = 0
@@ -207,6 +373,30 @@ class FailingEtsyProvider:
     async def search_listings(self, _keyword: str, country: str = "US", limit: int = 20) -> object:
         self.calls += 1
         raise RuntimeError("etsy unavailable")
+
+
+class LiveEtsyProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def search_listings(self, keyword: str, country: str = "US", limit: int = 20) -> EtsySearchResponse:
+        self.calls += 1
+        return EtsySearchResponse(
+            keyword=keyword,
+            country=country,
+            items=[
+                EtsyListingItem(
+                    country=country,
+                    keyword=keyword,
+                    title="live etsy listing",
+                    price=Decimal("42"),
+                    currency="USD",
+                    source_type="api",
+                    collected_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+                )
+            ],
+            fallback_used=False,
+        )
 
 
 class SecretFailingEtsyProvider(FailingEtsyProvider):
@@ -230,6 +420,38 @@ class FailingUnComtradeProvider:
     ) -> object:
         self.calls += 1
         raise RuntimeError("subscription-key fake-key unavailable")
+
+
+class LiveUnComtradeProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def get_trade_flow(
+        self,
+        reporter: str = "CHN",
+        partner: str = "USA",
+        hs_code: str = "6302",
+        flow: str = "export",
+        start_year: int = 2020,
+        end_year: int = 2024,
+    ) -> UnComtradeTradeFlowResponse:
+        self.calls += 1
+        return UnComtradeTradeFlowResponse(
+            hs_code=hs_code,
+            reporter=reporter,
+            partner=partner,
+            flow="export",
+            records=[
+                UnComtradeTradeRecord(
+                    year=end_year,
+                    trade_value_usd=Decimal("999"),
+                    quantity=Decimal("9"),
+                    source="api",
+                )
+            ],
+            fallback_used=False,
+            auth_mode="no_key",
+        )
 
 
 def _latest_log(db: Session) -> ApiCallLog:

@@ -55,13 +55,13 @@ export default function HomePage() {
                 href="/analysis/run"
                 className="rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#12566d]"
               >
-                运行分析
+                进入演示流程
               </Link>
               <Link
-                href="/marketing"
+                href="/reports"
                 className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-slate-50"
               >
-                生成营销文案
+                查看示例报告
               </Link>
             </div>
           </div>

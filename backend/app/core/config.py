@@ -7,6 +7,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     project_name: str = "SuPin ZhiHang Backend"
     project_version: str = "0.1.0"
+    app_env: str = Field(
+        default="local",
+        validation_alias=AliasChoices("APP_ENV", "SUPIN_APP_ENV"),
+    )
     database_url: str = Field(
         default="sqlite:///./supinzhihang.db",
         validation_alias=AliasChoices("DATABASE_URL", "SUPIN_DATABASE_URL"),
@@ -14,6 +18,22 @@ class Settings(BaseSettings):
     cors_origins: str = Field(
         default="http://localhost:3000",
         validation_alias=AliasChoices("CORS_ORIGINS", "SUPIN_CORS_ORIGINS"),
+    )
+    public_site_origin: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("PUBLIC_SITE_ORIGIN", "SUPIN_PUBLIC_SITE_ORIGIN"),
+    )
+    allowed_admin_origins: str = Field(
+        default="",
+        validation_alias=AliasChoices("ALLOWED_ADMIN_ORIGINS", "SUPIN_ALLOWED_ADMIN_ORIGINS"),
+    )
+    admin_password: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ADMIN_PASSWORD", "SUPIN_ADMIN_PASSWORD"),
+    )
+    admin_auth_enabled: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ADMIN_AUTH_ENABLED", "SUPIN_ADMIN_AUTH_ENABLED"),
     )
     bailian_api_key: str | None = Field(
         default=None,
@@ -107,6 +127,9 @@ class Settings(BaseSettings):
         "rakuten_app_id",
         "reddit_client_id",
         "reddit_client_secret",
+        "admin_password",
+        "public_site_origin",
+        "admin_auth_enabled",
         mode="before",
     )
     @classmethod
@@ -118,7 +141,36 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SUPIN_", extra="ignore", populate_by_name=True)
 
     def cors_origin_list(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        origins = _split_origins(self.cors_origins)
+        if self.is_production():
+            origins = [origin for origin in origins if origin != "*"]
+            origins.extend(["http://localhost:3000", "http://127.0.0.1:3000"])
+            if self.public_site_origin:
+                origins.append(self.public_site_origin)
+            origins.extend(_split_origins(self.allowed_admin_origins))
+        return _dedupe_origins(origins)
+
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() == "production"
+
+    def is_admin_auth_enabled(self) -> bool:
+        if self.admin_auth_enabled is not None:
+            return self.admin_auth_enabled
+        return self.is_production()
+
+
+def _split_origins(value: str) -> list[str]:
+    return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+
+def _dedupe_origins(origins: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for origin in origins:
+        if origin not in seen:
+            seen.add(origin)
+            deduped.append(origin)
+    return deduped
 
 
 @lru_cache

@@ -58,10 +58,40 @@ def test_data_source_post_routes_map_requests_to_service(
     assert profile.json()["country_code"] == "US"
     assert trade.json()["hs_code"] == "630221"
     assert service.calls == [
-        ("search_competitors", "boho blanket", "US", 5),
-        ("get_content_trends", "home decor", "GB", 8),
+        ("search_competitors", "boho blanket", "US", 5, False),
+        ("get_content_trends", "home decor", "GB", 8, False),
         ("get_market_profile", "US"),
-        ("get_trade_data", "cotton bedding", "630221", "US"),
+        ("get_trade_data", "cotton bedding", "630221", "US", False),
+    ]
+
+
+def test_data_source_post_routes_pass_force_live_true(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, _session_factory = client_with_session
+    service = StubDataSourceService()
+    app.dependency_overrides[get_data_source_service] = lambda: service
+
+    competitors = client.post(
+        "/api/data-sources/search-competitors",
+        json={"keyword": "home decor", "country": "US", "limit": 1, "force_live": True},
+    )
+    trends = client.post(
+        "/api/data-sources/search-trends",
+        json={"query": "home decor", "country": "US", "limit": 1, "force_live": True},
+    )
+    trade = client.post(
+        "/api/data-sources/trade-data",
+        json={"product_category": "cotton bedding", "hs_code": "630221", "country": "US", "force_live": True},
+    )
+
+    assert competitors.status_code == 200
+    assert trends.status_code == 200
+    assert trade.status_code == 200
+    assert service.calls == [
+        ("search_competitors", "home decor", "US", 1, True),
+        ("get_content_trends", "home decor", "US", 1, True),
+        ("get_trade_data", "cotton bedding", "630221", "US", True),
     ]
 
 
@@ -180,8 +210,9 @@ class StubDataSourceService:
         country: str | None = None,
         *,
         limit: int = 20,
+        force_live: bool = False,
     ) -> DataSourceCompetitorSearchResponse:
-        self.calls.append(("search_competitors", keyword, country, limit))
+        self.calls.append(("search_competitors", keyword, country, limit, force_live))
         return DataSourceCompetitorSearchResponse(
             keyword=keyword,
             country=country or "US",
@@ -206,8 +237,9 @@ class StubDataSourceService:
         country: str | None = None,
         *,
         limit: int = 20,
+        force_live: bool = False,
     ) -> DataSourceContentTrendResponse:
-        self.calls.append(("get_content_trends", keyword, country, limit))
+        self.calls.append(("get_content_trends", keyword, country, limit, force_live))
         return DataSourceContentTrendResponse(
             keyword=keyword,
             country=country,
@@ -246,8 +278,10 @@ class StubDataSourceService:
         product_category: str,
         hs_code: str | None = None,
         country: str | None = None,
+        *,
+        force_live: bool = False,
     ) -> UnComtradeTradeFlowResponse:
-        self.calls.append(("get_trade_data", product_category, hs_code, country))
+        self.calls.append(("get_trade_data", product_category, hs_code, country, force_live))
         return UnComtradeTradeFlowResponse(
             hs_code=hs_code or "6302",
             reporter="CHN",

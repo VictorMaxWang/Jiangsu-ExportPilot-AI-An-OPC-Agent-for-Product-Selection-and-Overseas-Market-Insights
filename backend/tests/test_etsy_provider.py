@@ -203,6 +203,67 @@ def test_etsy_search_parses_mock_response_and_does_not_leak_credentials() -> Non
     assert requests
 
 
+def test_etsy_openapi_ping_validates_configured_credentials() -> None:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path.endswith("/openapi-ping")
+        assert request.headers["x-api-key"] == "ping-fake-key:ping-fake-secret"
+        return httpx.Response(200, json={"ok": True})
+
+    provider = EtsyProvider(
+        settings=Settings(etsy_keystring="ping-fake-key", etsy_shared_secret="ping-fake-secret", enable_etsy=True),
+        transport=httpx.MockTransport(handler),
+        seed_dir=SEED_DIR,
+    )
+
+    assert asyncio.run(provider.openapi_ping()) is True
+    assert len(requests) == 1
+
+
+def test_etsy_listing_access_error_is_distinguishable_and_fallback_safe() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": "access restricted"})
+
+    provider = EtsyProvider(
+        settings=Settings(etsy_keystring="access-fake-key", etsy_shared_secret="access-fake-secret", enable_etsy=True),
+        transport=httpx.MockTransport(handler),
+        seed_dir=SEED_DIR,
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(provider.search_listings("home decor", country="US", limit=1, allow_fallback=False))
+
+    assert getattr(exc_info.value, "code") == "credentials_valid_but_listing_search_requires_oauth_or_approval"
+
+    fallback = asyncio.run(provider.search_listings("home decor", country="US", limit=1))
+    assert fallback.fallback_used is True
+    assert fallback.items
+    assert fallback.items[0].source_type == "csv_fallback"
+    serialized = fallback.model_dump_json()
+    assert "access-fake-key" not in serialized
+    assert "access-fake-secret" not in serialized
+
+
+def test_etsy_listing_oauth_body_error_is_distinguishable() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "OAuth approval required for listing access"})
+
+    provider = EtsyProvider(
+        settings=Settings(etsy_keystring="body-fake-key", etsy_shared_secret="body-fake-secret", enable_etsy=True),
+        transport=httpx.MockTransport(handler),
+        seed_dir=SEED_DIR,
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(provider.search_listings("home decor", country="US", limit=1, allow_fallback=False))
+
+    assert getattr(exc_info.value, "code") == "credentials_valid_but_listing_search_requires_oauth_or_approval"
+    assert "body-fake-key" not in str(exc_info.value)
+    assert "body-fake-secret" not in str(exc_info.value)
+
+
 def test_etsy_search_schema_matches_contract() -> None:
     async def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(

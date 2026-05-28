@@ -16,7 +16,8 @@ export type ProviderStatus =
   | "disabled"
   | "unavailable"
   | "success"
-  | "pending";
+  | "pending"
+  | "credentials_valid_but_listing_search_requires_oauth_or_approval";
 
 type ProviderStatusBadgeProps = {
   status: ProviderStatus;
@@ -42,6 +43,7 @@ const statusLabels: Record<ProviderStatus, string> = {
   unavailable: "不可用",
   success: "测试通过",
   pending: "等待配置",
+  credentials_valid_but_listing_search_requires_oauth_or_approval: "凭据有效，需授权",
 };
 
 const statusClassNames: Record<ProviderStatus, string> = {
@@ -63,6 +65,7 @@ const statusClassNames: Record<ProviderStatus, string> = {
   unavailable: "bg-red-50 text-red-700 ring-red-200",
   success: "bg-jade/10 text-jade ring-jade/20",
   pending: "bg-slate-100 text-slate-600 ring-slate-200",
+  credentials_valid_but_listing_search_requires_oauth_or_approval: "bg-wheat/15 text-ink ring-wheat/30",
 };
 
 export function ProviderStatusBadge({ status, label }: ProviderStatusBadgeProps) {

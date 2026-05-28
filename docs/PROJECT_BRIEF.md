@@ -29,12 +29,12 @@
 
 - 企业产品信息录入：产品名称、品类、材料、价格区间、目标市场、产地优势等。
 - CSV 样本数据导入：在外部 API 不稳定或无 Key 时提供可演示数据。
-- 外部数据源接入：World Bank、GDELT、eBay、UN Comtrade、Rakuten、YouTube、Etsy、Reddit。
+- 外部数据源接入：当前 runtime 覆盖 World Bank、GDELT、UN Comtrade、YouTube、Etsy 和 CSV fallback；eBay、Rakuten、Reddit 保留为 P2 future provider。
 - 阿里云百炼分析：使用 `qwen3.6-plus` 生成洞察、评分解释和营销建议。
 - 市场机会评分：综合需求、竞争、宏观环境、内容热度、贸易数据和风险因素。
 - 营销文案生成：生成英文或目标市场本地化的标题、卖点、广告文案和社媒内容草稿。
 - 可视化看板：展示评分、趋势、国家对比、平台信号和 AI 摘要。
-- 出海报告生成：输出结构化 Markdown/HTML/PDF 报告，支撑比赛路演。
+- 出海报告生成：输出结构化 Markdown/HTML 报告并支持复制/预览；PDF 导出保留为 v1 后续增强。
 
 ## MVP 范围
 
@@ -46,7 +46,7 @@ MVP 必须支持：
 - 后端统一封装外部数据源和 AI 调用。
 - 生成市场机会评分和可解释理由。
 - 前端展示产品、目标市场、评分、图表和 AI 洞察。
-- 生成一份可下载或可复制的出海报告。
+- 生成一份可预览、可复制的出海报告；PDF 下载不作为当前 MVP 验收条件。
 - 管理页显示各 API Key 的“已配置/未配置”状态，不显示明文。
 
 ## 非 MVP 范围

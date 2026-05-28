@@ -41,6 +41,7 @@ from app.services.data_sources import DataSourceService
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
 from app.services.reports import ReportGenerationInputError, ReportGenerator
 from app.services.scoring import OpportunityScoringService
+from app.utils.redaction import redact_text
 
 
 WORKFLOW_STATUS_WAITING = "waiting"
@@ -264,8 +265,9 @@ class ExportInsightWorkflow:
         try:
             result = await agent.run(context)
         except WorkflowInputError as exc:
-            self._fail_step(context.analysis_run, step.step_id, exc.code, str(exc), started_at, start)
-            self._mark_run_failed(context.analysis_run, str(exc))
+            message = redact_text(str(exc)) or "Workflow input failed."
+            self._fail_step(context.analysis_run, step.step_id, exc.code, message, started_at, start)
+            self._mark_run_failed(context.analysis_run, message)
             return None
         except Exception:
             self._fail_step(
@@ -361,7 +363,7 @@ class ExportInsightWorkflow:
                 "finished_at": _utc_now().isoformat(),
                 "duration_ms": max(0, round((perf_counter() - start) * 1000)),
                 "error_code": code,
-                "error_message": message,
+                "error_message": redact_text(message),
             },
         )
         self._db.commit()
@@ -369,7 +371,7 @@ class ExportInsightWorkflow:
     def _mark_run_failed(self, analysis_run: AnalysisRun, message: str) -> None:
         analysis_run.status = WORKFLOW_STATUS_FAILED
         analysis_run.finished_at = _utc_now()
-        analysis_run.error_message = message
+        analysis_run.error_message = redact_text(message)
         self._db.commit()
 
     def _score_rows(self, analysis_id: int) -> list[dict[str, Any]]:

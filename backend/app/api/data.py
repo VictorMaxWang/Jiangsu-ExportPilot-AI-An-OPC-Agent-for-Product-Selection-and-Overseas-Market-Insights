@@ -25,6 +25,7 @@ from app.services.providers.un_comtrade import UnComtradeProvider, un_comtrade_s
 from app.services.providers.worldbank import SUPPORTED_COUNTRIES, WorldBankProvider
 from app.services.providers.youtube import YoutubeProvider, youtube_seed_queries
 from app.services.youtube_cache_service import YoutubeSearchCacheService
+from app.utils.redaction import redact_text
 
 
 router = APIRouter()
@@ -65,7 +66,7 @@ async def get_worldbank_country(
     try:
         return await provider.fetch_country(country_code)
     except DataProviderValidationError as exc:
-        raise _validation_exception("worldbank", str(exc)) from exc
+        raise _validation_exception("worldbank", redact_text(str(exc)) or "") from exc
 
 
 @router.post("/worldbank/sync", response_model=DataProviderSyncResponse)
@@ -82,7 +83,7 @@ async def sync_worldbank(
         try:
             payload = await provider.fetch_country(country_code)
         except DataProviderValidationError as exc:
-            errors.append(str(exc))
+            errors.append(redact_text(str(exc)) or "")
             continue
 
         fallback_used = fallback_used or payload.fallback_used
@@ -136,7 +137,7 @@ async def search_gdelt(
     try:
         return await provider.search(query, country=country)
     except DataProviderValidationError as exc:
-        raise _validation_exception("gdelt", str(exc)) from exc
+        raise _validation_exception("gdelt", redact_text(str(exc)) or "") from exc
 
 
 @router.post("/gdelt/sync", response_model=DataProviderSyncResponse)
@@ -154,7 +155,7 @@ async def sync_gdelt(
         try:
             payload = await provider.search(query)
         except DataProviderValidationError as exc:
-            errors.append(str(exc))
+            errors.append(redact_text(str(exc)) or "")
             continue
 
         fallback_used = fallback_used or payload.fallback_used
@@ -214,7 +215,7 @@ async def search_youtube(
     try:
         return await service.search_videos(keyword, country=country, limit=limit)
     except DataProviderValidationError as exc:
-        raise _validation_exception("youtube", str(exc)) from exc
+        raise _validation_exception("youtube", redact_text(str(exc)) or "") from exc
 
 
 @router.post("/youtube/sync", response_model=DataProviderSyncResponse)
@@ -233,7 +234,7 @@ async def sync_youtube(
         try:
             payload = await service.search_videos(keyword, country=country, limit=10)
         except DataProviderValidationError as exc:
-            errors.append(str(exc))
+            errors.append(redact_text(str(exc)) or "")
             continue
 
         fallback_used = fallback_used or payload.fallback_used
@@ -296,7 +297,7 @@ async def search_etsy(
     try:
         return await provider.search_listings(keyword, country=country, limit=limit)
     except DataProviderValidationError as exc:
-        raise _validation_exception("etsy", str(exc)) from exc
+        raise _validation_exception("etsy", redact_text(str(exc)) or "") from exc
 
 
 @router.post("/etsy/sync", response_model=DataProviderSyncResponse)
@@ -315,7 +316,7 @@ async def sync_etsy(
         try:
             payload = await provider.search_listings(keyword, country=country, limit=20)
         except DataProviderValidationError as exc:
-            errors.append(str(exc))
+            errors.append(redact_text(str(exc)) or "")
             continue
 
         fallback_used = fallback_used or payload.fallback_used
@@ -388,7 +389,7 @@ async def get_un_comtrade_trade_flow(
             end_year=end_year,
         )
     except DataProviderValidationError as exc:
-        raise _validation_exception("un_comtrade", str(exc)) from exc
+        raise _validation_exception("un_comtrade", redact_text(str(exc)) or "") from exc
 
 
 @router.post("/comtrade/sync", response_model=DataProviderSyncResponse)
@@ -414,7 +415,7 @@ async def sync_un_comtrade(
                 end_year=query.end_year,
             )
         except DataProviderValidationError as exc:
-            errors.append(str(exc))
+            errors.append(redact_text(str(exc)) or "")
             continue
 
         fallback_used = fallback_used or payload.fallback_used

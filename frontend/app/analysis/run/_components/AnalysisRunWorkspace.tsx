@@ -14,6 +14,7 @@ import {
   AnalysisWorkflowStatus,
   Company,
   Product,
+  generateReport,
   getAnalysisStatus,
   getFriendlyErrorMessage,
   listCompanies,
@@ -21,25 +22,34 @@ import {
   startAnalysisRun,
 } from "../../../_lib/api-client";
 
-type CompletionTarget = "report" | "dashboard";
-
 const POLL_INTERVAL_MS = 1500;
 const MAX_POLL_COUNT = 80;
+const DEMO_COUNTRY_INPUT = "US, JP, GB";
+const DEMO_PRODUCT_COUNT = 3;
+const DEFAULT_COMPETITOR_LIMIT = 20;
 
 const STEP_IDS = Object.keys(AGENT_STEP_LABELS);
+
+type EvidenceCard = {
+  key: string;
+  title: string;
+  status: string;
+  detail: string;
+  tone: "api" | "csv" | "ai";
+};
 
 export function AnalysisRunWorkspace() {
   const router = useRouter();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
-  const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
-  const [countryInput, setCountryInput] = useState("US, JP");
-  const [competitorLimit, setCompetitorLimit] = useState(20);
-  const [completionTarget, setCompletionTarget] = useState<CompletionTarget>("report");
+  const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
+  const [countryInput, setCountryInput] = useState(DEMO_COUNTRY_INPUT);
+  const [competitorLimit, setCompetitorLimit] = useState(DEFAULT_COMPETITOR_LIMIT);
   const [loading, setLoading] = useState(true);
   const [productsLoading, setProductsLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatusResponse | null>(null);
   const [analysisId, setAnalysisId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +59,6 @@ export function AnalysisRunWorkspace() {
   const pollCountRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const redirectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearPollingTimer = useCallback(() => {
     if (timeoutRef.current) {
@@ -64,43 +73,54 @@ export function AnalysisRunWorkspace() {
     abortRef.current = null;
   }, [clearPollingTimer]);
 
-  const clearRedirect = useCallback(() => {
-    if (redirectRef.current) {
-      clearTimeout(redirectRef.current);
-      redirectRef.current = null;
-    }
-  }, []);
+  const resetRunState = useCallback(() => {
+    clearPolling();
+    runTokenRef.current += 1;
+    pollCountRef.current = 0;
+    setSubmitting(false);
+    setGeneratingReport(false);
+    setAnalysisStatus(null);
+    setAnalysisId(null);
+    setError(null);
+    setNotice(null);
+  }, [clearPolling]);
 
   const selectedCompany = useMemo(
     () => companies.find((company) => company.id === selectedCompanyId) ?? null,
     [companies, selectedCompanyId],
   );
 
-  const selectedProduct = useMemo(
-    () => products.find((product) => product.id === selectedProductId) ?? null,
-    [products, selectedProductId],
+  const selectedProducts = useMemo(
+    () => products.filter((product) => selectedProductIds.includes(product.id)),
+    [products, selectedProductIds],
   );
 
   const terminal = analysisStatus ? isTerminalStatus(analysisStatus.status) : false;
   const fallbackUsed = analysisStatus?.status === "fallback_used" || Boolean(analysisStatus?.fallback_used_providers.length);
   const timelineSteps = analysisStatus?.step_logs.length ? analysisStatus.step_logs : buildInitialSteps();
 
-  const loadProducts = useCallback(async (companyId: number, selectFirst = false) => {
+  const loadProducts = useCallback(async (companyId: number, selectDemoDefaults = false): Promise<Product[]> => {
     setProductsLoading(true);
     setError(null);
     try {
       const productResponse = await listProducts(companyId);
-      setProducts(productResponse.items);
-      setSelectedProductId((current) => {
-        if (!selectFirst && current && productResponse.items.some((product) => product.id === current)) {
-          return current;
+      const items = productResponse.items;
+      setProducts(items);
+      setSelectedProductIds((current) => {
+        if (!selectDemoDefaults) {
+          const retained = current.filter((productId) => items.some((product) => product.id === productId));
+          if (retained.length > 0) {
+            return retained;
+          }
         }
-        return productResponse.items[0]?.id ?? null;
+        return firstProductIds(items);
       });
+      return items;
     } catch (requestError) {
       setProducts([]);
-      setSelectedProductId(null);
+      setSelectedProductIds([]);
       setError(getFriendlyErrorMessage(requestError));
+      return [];
     } finally {
       setProductsLoading(false);
     }
@@ -114,12 +134,13 @@ export function AnalysisRunWorkspace() {
       setCompanies(companyResponse.items);
       const firstCompany = companyResponse.items[0] ?? null;
       setSelectedCompanyId(firstCompany?.id ?? null);
-      setCountryInput(firstCompany?.target_countries?.join(", ") || "US, JP");
+      setCountryInput(DEMO_COUNTRY_INPUT);
+      setCompetitorLimit(DEFAULT_COMPETITOR_LIMIT);
       if (firstCompany) {
         await loadProducts(firstCompany.id, true);
       } else {
         setProducts([]);
-        setSelectedProductId(null);
+        setSelectedProductIds([]);
       }
     } catch (requestError) {
       setError(getFriendlyErrorMessage(requestError));
@@ -132,23 +153,47 @@ export function AnalysisRunWorkspace() {
     void loadInitialData();
     return () => {
       clearPolling();
-      clearRedirect();
     };
-  }, [clearPolling, clearRedirect, loadInitialData]);
+  }, [clearPolling, loadInitialData]);
 
   function handleCompanyChange(value: string) {
     const companyId = value ? Number(value) : null;
+    resetRunState();
     setSelectedCompanyId(companyId);
-    setSelectedProductId(null);
-    setAnalysisStatus(null);
-    setAnalysisId(null);
-    const company = companies.find((item) => item.id === companyId) ?? null;
-    setCountryInput(company?.target_countries?.join(", ") || countryInput);
+    setSelectedProductIds([]);
+    setCountryInput(DEMO_COUNTRY_INPUT);
     if (companyId) {
       void loadProducts(companyId, true);
     } else {
       setProducts([]);
     }
+  }
+
+  async function applyRecommendedDemoConfig() {
+    const demoCompany = companies[0] ?? null;
+    if (!demoCompany) {
+      setError("请先创建企业，再使用推荐演示配置。");
+      return;
+    }
+    resetRunState();
+    setSelectedCompanyId(demoCompany.id);
+    setCountryInput(DEMO_COUNTRY_INPUT);
+    setCompetitorLimit(DEFAULT_COMPETITOR_LIMIT);
+    await loadProducts(demoCompany.id, true);
+    setNotice("已应用推荐演示配置：首个企业、前 3 个产品、US/JP/GB 和 20 条竞品采集上限。");
+  }
+
+  function toggleProduct(productId: number, checked: boolean) {
+    resetRunState();
+    setSelectedProductIds((current) => {
+      if (!checked) {
+        return current.filter((id) => id !== productId);
+      }
+      if (current.includes(productId)) {
+        return current;
+      }
+      return [...current, productId];
+    });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -160,8 +205,10 @@ export function AnalysisRunWorkspace() {
       setError("请先选择企业。");
       return;
     }
-    if (!selectedProductId) {
-      setError("请先选择产品。");
+
+    const productIds = selectedProductIds.filter((productId) => products.some((product) => product.id === productId));
+    if (productIds.length === 0) {
+      setError("请至少选择一个产品。");
       return;
     }
 
@@ -178,7 +225,6 @@ export function AnalysisRunWorkspace() {
     }
 
     clearPolling();
-    clearRedirect();
     const token = runTokenRef.current + 1;
     runTokenRef.current = token;
     pollCountRef.current = 0;
@@ -193,7 +239,7 @@ export function AnalysisRunWorkspace() {
       const started = await startAnalysisRun(
         {
           company_id: selectedCompanyId,
-          product_ids: [selectedProductId],
+          product_ids: productIds,
           target_countries: countries,
           competitor_limit: competitorLimit,
         },
@@ -228,10 +274,7 @@ export function AnalysisRunWorkspace() {
       setAnalysisStatus(status);
       if (isTerminalStatus(status.status) || status.finished_at) {
         setSubmitting(false);
-        setNotice(buildTerminalNotice(status, completionTarget));
-        if (status.status !== "failed") {
-          scheduleRedirect(status, completionTarget);
-        }
+        setNotice(buildTerminalNotice(status));
         return;
       }
 
@@ -254,15 +297,23 @@ export function AnalysisRunWorkspace() {
     }
   }
 
-  function scheduleRedirect(status: AnalysisStatusResponse, target: CompletionTarget) {
-    clearRedirect();
-    const href =
-      target === "report"
-        ? status.next_page_url || `/reports?analysis_id=${status.analysis_id}`
-        : `/dashboard/${status.analysis_id}`;
-    redirectRef.current = setTimeout(() => {
-      router.push(href);
-    }, 1800);
+  async function handleGenerateReport() {
+    const reportAnalysisId = analysisStatus?.analysis_id ?? analysisId;
+    if (!reportAnalysisId) {
+      setError("请先完成一次分析，再生成报告。");
+      return;
+    }
+    setGeneratingReport(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const report = await generateReport({ analysis_id: reportAnalysisId, force_regenerate: false });
+      router.push(`/reports/${report.id}`);
+    } catch (requestError) {
+      setError(getFriendlyErrorMessage(requestError));
+    } finally {
+      setGeneratingReport(false);
+    }
   }
 
   return (
@@ -275,9 +326,29 @@ export function AnalysisRunWorkspace() {
             <EmptyState
               title="暂无企业"
               description="请先录入企业，再启动智能体协作分析。"
+              action={
+                <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/companies">
+                  去创建企业
+                </Link>
+              }
             />
           ) : (
             <form className="grid gap-4" onSubmit={handleSubmit}>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-river/20 bg-river/5 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-ink">推荐演示配置</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">首个企业、前 3 个产品、US/JP/GB，适合 5 分钟现场演示。</p>
+                </div>
+                <button
+                  className="rounded-md border border-river/30 bg-white px-3 py-2 text-sm font-semibold text-river disabled:cursor-not-allowed disabled:bg-slate-100"
+                  disabled={productsLoading || submitting}
+                  type="button"
+                  onClick={() => void applyRecommendedDemoConfig()}
+                >
+                  使用推荐演示配置
+                </button>
+              </div>
+
               <label className="grid gap-2">
                 <span className="text-sm font-medium text-slate-700">选择企业</span>
                 <select
@@ -294,64 +365,77 @@ export function AnalysisRunWorkspace() {
                 </select>
               </label>
 
-              <label className="grid gap-2">
+              <div className="grid gap-2">
                 <span className="text-sm font-medium text-slate-700">选择产品</span>
-                <select
-                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20 disabled:bg-slate-100"
-                  disabled={productsLoading || products.length === 0}
-                  required
-                  value={selectedProductId ?? ""}
-                  onChange={(event) => setSelectedProductId(event.target.value ? Number(event.target.value) : null)}
-                >
-                  {productsLoading ? <option value="">产品加载中</option> : null}
-                  {!productsLoading && products.length === 0 ? <option value="">该企业暂无产品</option> : null}
-                  {products.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.product_name_cn}
-                      {product.product_name_en ? ` / ${product.product_name_en}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  {productsLoading ? (
+                    <LoadingState label="产品加载中" rows={2} />
+                  ) : products.length === 0 ? (
+                    <EmptyState
+                      title="该企业暂无产品"
+                      description="请先前往产品页导入南通家纺样本产品。"
+                      action={
+                        <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/products">
+                          去导入产品
+                        </Link>
+                      }
+                    />
+                  ) : (
+                    <div className="grid gap-2">
+                      {products.map((product) => (
+                        <label
+                          key={product.id}
+                          className="flex items-start gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                        >
+                          <input
+                            checked={selectedProductIds.includes(product.id)}
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-river focus:ring-river"
+                            type="checkbox"
+                            onChange={(event) => toggleProduct(product.id, event.target.checked)}
+                          />
+                          <span>
+                            <span className="font-medium text-ink">{product.product_name_cn}</span>
+                            {product.product_name_en ? <span className="text-slate-500"> / {product.product_name_en}</span> : null}
+                          </span>
+                        </label>
+                      ))}
+                      <p className="text-xs text-slate-500">默认选择前 3 个产品；可按现场讲解需要增减。</p>
+                    </div>
+                  )}
+                </div>
+              </div>
 
               <label className="grid gap-2">
                 <span className="text-sm font-medium text-slate-700">选择目标国家</span>
                 <input
                   className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
-                  placeholder="US, JP, GB"
+                  placeholder={DEMO_COUNTRY_INPUT}
                   value={countryInput}
-                  onChange={(event) => setCountryInput(event.target.value)}
+                  onChange={(event) => {
+                    resetRunState();
+                    setCountryInput(event.target.value);
+                  }}
                 />
               </label>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-2">
-                  <span className="text-sm font-medium text-slate-700">竞品采集上限</span>
-                  <input
-                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
-                    max={50}
-                    min={1}
-                    type="number"
-                    value={competitorLimit}
-                    onChange={(event) => setCompetitorLimit(Number(event.target.value))}
-                  />
-                </label>
-                <label className="grid gap-2">
-                  <span className="text-sm font-medium text-slate-700">完成后跳转</span>
-                  <select
-                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
-                    value={completionTarget}
-                    onChange={(event) => setCompletionTarget(event.target.value as CompletionTarget)}
-                  >
-                    <option value="report">报告页</option>
-                    <option value="dashboard">看板页</option>
-                  </select>
-                </label>
-              </div>
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-slate-700">竞品采集上限</span>
+                <input
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
+                  max={50}
+                  min={1}
+                  type="number"
+                  value={competitorLimit}
+                  onChange={(event) => {
+                    resetRunState();
+                    setCompetitorLimit(Number(event.target.value));
+                  }}
+                />
+              </label>
 
               <button
                 className="rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-                disabled={submitting || productsLoading || !selectedCompanyId || !selectedProductId}
+                disabled={submitting || productsLoading || !selectedCompanyId || selectedProductIds.length === 0}
                 type="submit"
               >
                 {submitting ? "智能体分析中" : "开始智能体分析"}
@@ -364,14 +448,7 @@ export function AnalysisRunWorkspace() {
           <div className="grid gap-3">
             <DetailItem label="分析 ID" value={analysisId ? `#${analysisId}` : "-"} />
             <DetailItem label="企业" value={selectedCompany?.name ?? "-"} />
-            <DetailItem
-              label="产品"
-              value={
-                selectedProduct
-                  ? `${selectedProduct.product_name_cn}${selectedProduct.product_name_en ? ` / ${selectedProduct.product_name_en}` : ""}`
-                  : "-"
-              }
-            />
+            <DetailItem label="产品" value={selectedProductsLabel(selectedProducts)} />
             <DetailItem label="目标国家" value={parseCountries(countryInput).join(", ") || "-"} />
             <DetailItem label="整体状态" value={analysisStatus?.status ?? "waiting"} />
           </div>
@@ -385,7 +462,7 @@ export function AnalysisRunWorkspace() {
               <ErrorState message={error} />
             </div>
           ) : null}
-          {!selectedProductId && selectedCompanyId && !productsLoading ? (
+          {selectedProductIds.length === 0 && selectedCompanyId && !productsLoading ? (
             <p className="mt-4 text-sm leading-6 text-slate-500">
               当前企业没有可选产品，可前往 <Link className="font-semibold text-river" href="/products">产品页</Link> 创建或导入样本。
             </p>
@@ -404,16 +481,18 @@ export function AnalysisRunWorkspace() {
               <div className="mt-4 flex flex-wrap gap-2">
                 <Link
                   className="rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white"
-                  href={analysisStatus.next_page_url || `/reports?analysis_id=${analysisStatus.analysis_id}`}
-                >
-                  查看报告
-                </Link>
-                <Link
-                  className="rounded-md border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700"
                   href={`/dashboard/${analysisStatus.analysis_id}`}
                 >
                   查看看板
                 </Link>
+                <button
+                  className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  disabled={generatingReport}
+                  type="button"
+                  onClick={() => void handleGenerateReport()}
+                >
+                  {generatingReport ? "生成中" : "生成报告"}
+                </button>
               </div>
             ) : null}
           </Panel>
@@ -425,7 +504,7 @@ export function AnalysisRunWorkspace() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-ink">9 个后端智能体按顺序执行</p>
-              <p className="mt-1 text-xs text-slate-500">每 {POLL_INTERVAL_MS / 1000} 秒读取一次状态，完成后停止轮询。</p>
+              <p className="mt-1 text-xs text-slate-500">每 {POLL_INTERVAL_MS / 1000} 秒读取一次状态，完成后停留在本页供评委选择下一步。</p>
             </div>
             <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ${overallStatusClassName(analysisStatus?.status ?? "waiting")}`}>
               {analysisStatus?.status ?? "waiting"}
@@ -434,11 +513,13 @@ export function AnalysisRunWorkspace() {
           <AgentFlowTimeline currentStepId={analysisStatus?.current_step} steps={timelineSteps} />
         </Panel>
 
+        <FallbackSummary status={analysisStatus} />
+
         {fallbackUsed ? (
           <FallbackNotice
             source="sample"
             title="fallback_used 不是失败"
-            description="该步骤使用本地样本数据保障演示稳定。完成态 fallback_used 表示流程已产出结果，但部分公开 API 或 AI 输出走了兜底路径。"
+            description="该步骤使用公开 API 缓存、CSV 样本或确定性 AI 模板保障演示稳定。完成态 fallback_used 表示流程已产出结果，需要在正式投放前复核实时证据。"
           />
         ) : null}
 
@@ -465,6 +546,24 @@ function DetailItem({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-semibold text-slate-500">{label}</p>
       <p className="mt-1 truncate font-medium text-ink">{value}</p>
     </div>
+  );
+}
+
+function FallbackSummary({ status }: { status: AnalysisStatusResponse | null }) {
+  const cards = buildEvidenceCards(status);
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
+      <h2 className="text-lg font-semibold text-ink">数据与兜底路径</h2>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        {cards.map((card) => (
+          <article key={card.key} className={`rounded-lg border p-4 ${evidenceCardClassName(card.tone)}`}>
+            <p className="text-sm font-semibold text-ink">{card.title}</p>
+            <p className="mt-2 text-xs font-semibold uppercase tracking-normal text-slate-500">{card.status}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">{card.detail}</p>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -502,6 +601,89 @@ function stepIdToNode(stepId: string): string {
   return nodes[stepId] ?? "WorkflowAgent";
 }
 
+function buildEvidenceCards(status: AnalysisStatusResponse | null): EvidenceCard[] {
+  const apiLabels = new Set<string>();
+  const csvLabels = new Set<string>();
+  const aiLabels = new Set<string>();
+
+  for (const provider of status?.provider_breakdown ?? []) {
+    const label = provider.labels[0] || provider.provider;
+    if (provider.api_invoked) {
+      apiLabels.add(label);
+    }
+    if (provider.fallback_used || provider.source_types.some((type) => type.includes("csv_fallback"))) {
+      csvLabels.add(label);
+    }
+  }
+
+  for (const step of status?.step_logs ?? []) {
+    for (const source of step.sources) {
+      const provider = readSourceString(source, "provider");
+      const label = readSourceString(source, "source_label") || readSourceString(source, "label") || provider || step.title;
+      const sourceType = readSourceString(source, "source_type");
+      const apiInvoked = readSourceBoolean(source, "api_invoked");
+      const fallback = readSourceBoolean(source, "fallback_used");
+      if (apiInvoked || sourceType === "api" || sourceType === "public_api") {
+        apiLabels.add(label);
+      }
+      if (sourceType.includes("csv_fallback") || (fallback && provider !== "bailian" && sourceType !== "ai_fallback")) {
+        csvLabels.add(label);
+      }
+      if (sourceType === "ai_fallback" || (provider === "bailian" && fallback)) {
+        aiLabels.add(label);
+      }
+    }
+    if (step.fallback_reason?.toLowerCase().includes("ai")) {
+      aiLabels.add(step.title);
+    }
+  }
+
+  for (const provider of status?.fallback_used_providers ?? []) {
+    if (provider.toLowerCase().includes("bailian") || provider.toLowerCase().includes("ai")) {
+      aiLabels.add(provider);
+    } else {
+      csvLabels.add(provider);
+    }
+  }
+
+  return [
+    {
+      key: "api",
+      title: "API 数据",
+      status: apiLabels.size > 0 ? "已读取或尝试调用" : "等待工作流读取",
+      detail: apiLabels.size > 0 ? summarizeLabels(apiLabels) : "World Bank、GDELT、Etsy、YouTube、UN Comtrade 等公开数据会在工作流中统一记录来源。",
+      tone: "api",
+    },
+    {
+      key: "csv",
+      title: "CSV fallback",
+      status: csvLabels.size > 0 ? "已启用兜底" : "可用兜底",
+      detail: csvLabels.size > 0 ? summarizeLabels(csvLabels) : "现场网络或平台 API 不稳定时，内置 seed CSV 会保障评分、看板和报告继续产出。",
+      tone: "csv",
+    },
+    {
+      key: "ai",
+      title: "AI fallback",
+      status: aiLabels.size > 0 ? "已使用模板兜底" : "模型优先，模板兜底",
+      detail: aiLabels.size > 0 ? summarizeLabels(aiLabels) : "qwen3.6-plus 不可用时，后端使用确定性模板生成解释、营销草稿或报告结构。",
+      tone: "ai",
+    },
+  ];
+}
+
+function firstProductIds(items: Product[]): number[] {
+  return items.slice(0, DEMO_PRODUCT_COUNT).map((product) => product.id);
+}
+
+function selectedProductsLabel(products: Product[]): string {
+  if (products.length === 0) {
+    return "-";
+  }
+  return products
+    .map((product) => product.product_name_en ? `${product.product_name_cn} / ${product.product_name_en}` : product.product_name_cn)
+    .join("、");
+}
+
 function parseCountries(value: string): string[] {
   const seen = new Set<string>();
   return countryTokens(value)
@@ -531,12 +713,11 @@ function isTerminalStatus(status: AnalysisWorkflowStatus): boolean {
   return status === "success" || status === "failed" || status === "fallback_used";
 }
 
-function buildTerminalNotice(status: AnalysisStatusResponse, target: CompletionTarget): string {
+function buildTerminalNotice(status: AnalysisStatusResponse): string {
   if (status.status === "failed") {
     return "分析已停止，失败步骤已在右侧标出。";
   }
-  const targetLabel = target === "report" ? "报告页" : "看板页";
-  return `分析 #${status.analysis_id} 已完成，正在跳转${targetLabel}。`;
+  return `分析 #${status.analysis_id} 已完成，可继续查看看板或生成报告。`;
 }
 
 function formatScore(value: string | number | null): string {
@@ -555,6 +736,33 @@ function overallStatusClassName(status: AnalysisWorkflowStatus): string {
     fallback_used: "bg-wheat/15 text-ink ring-wheat/30",
   };
   return classNames[status];
+}
+
+function evidenceCardClassName(tone: EvidenceCard["tone"]): string {
+  const classNames: Record<EvidenceCard["tone"], string> = {
+    api: "border-river/20 bg-river/5",
+    csv: "border-wheat/40 bg-wheat/10",
+    ai: "border-jade/20 bg-jade/10",
+  };
+  return classNames[tone];
+}
+
+function summarizeLabels(labels: Set<string>): string {
+  const values = Array.from(labels).filter(Boolean);
+  if (values.length === 0) {
+    return "-";
+  }
+  const visible = values.slice(0, 4).join("、");
+  return values.length > 4 ? `${visible} 等 ${values.length} 项来源` : visible;
+}
+
+function readSourceString(source: Record<string, unknown>, key: string): string {
+  const value = source[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readSourceBoolean(source: Record<string, unknown>, key: string): boolean {
+  return source[key] === true;
 }
 
 function isAbortError(error: unknown): boolean {

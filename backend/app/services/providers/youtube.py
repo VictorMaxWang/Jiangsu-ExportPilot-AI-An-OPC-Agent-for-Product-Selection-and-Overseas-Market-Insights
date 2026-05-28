@@ -62,12 +62,21 @@ class YoutubeProvider:
         keyword: str,
         country: str = "US",
         max_results: int = MAX_YOUTUBE_RESULTS,
+        *,
+        allow_fallback: bool = True,
     ) -> YoutubeSearchResponse:
         normalized_keyword = normalize_keyword(keyword)
         normalized_country = normalize_country(country)
         safe_max_results = clamp_max_results(max_results)
 
-        if not self._settings.enable_youtube or not self._settings.youtube_data_api_key:
+        if not self._settings.enable_youtube:
+            if not allow_fallback:
+                raise _YoutubeApiError("YOUTUBE_DISABLED")
+            return self._fallback_search(normalized_keyword, normalized_country, safe_max_results)
+
+        if not self._settings.youtube_data_api_key:
+            if not allow_fallback:
+                raise _YoutubeApiError("YOUTUBE_NOT_CONFIGURED")
             return self._fallback_search(normalized_keyword, normalized_country, safe_max_results)
 
         try:
@@ -79,6 +88,8 @@ class YoutubeProvider:
                 fallback_used=False,
             )
         except _YoutubeApiError:
+            if not allow_fallback:
+                raise
             return self._fallback_search(normalized_keyword, normalized_country, safe_max_results)
 
     async def _fetch_api_items(

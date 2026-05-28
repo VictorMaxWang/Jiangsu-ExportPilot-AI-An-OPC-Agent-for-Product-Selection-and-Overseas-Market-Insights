@@ -7,6 +7,7 @@ type ChartPanelProps = {
   isEmpty?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
+  sourceNote?: string;
   badge?: ReactNode;
   children: ReactNode;
 };
@@ -17,6 +18,7 @@ export function ChartPanel({
   isEmpty = false,
   emptyTitle = "暂无图表数据",
   emptyDescription = "当前分析结果未生成该图表所需的数据。",
+  sourceNote,
   badge,
   children,
 }: ChartPanelProps) {
@@ -32,6 +34,11 @@ export function ChartPanel({
       <div className="mt-4">
         {isEmpty ? <EmptyState title={emptyTitle} description={emptyDescription} /> : children}
       </div>
+      {sourceNote ? (
+        <p className="mt-4 rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+          {sourceNote}
+        </p>
+      ) : null}
     </section>
   );
 }

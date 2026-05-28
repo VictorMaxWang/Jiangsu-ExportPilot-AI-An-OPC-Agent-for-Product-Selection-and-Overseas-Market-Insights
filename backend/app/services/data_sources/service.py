@@ -45,6 +45,7 @@ from app.services.providers.youtube import (
     normalize_country as normalize_youtube_country,
     normalize_keyword as normalize_youtube_keyword,
 )
+from app.utils.redaction import redact_mapping, redact_text
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -122,6 +123,7 @@ class DataSourceService:
         country: str | None = None,
         *,
         limit: int = 10,
+        force_live: bool = False,
     ) -> YoutubeSearchResponse:
         normalized_keyword = normalize_youtube_keyword(keyword)
         normalized_country = normalize_youtube_country(country or DEFAULT_COUNTRY)
@@ -134,6 +136,7 @@ class DataSourceService:
             response_model=YoutubeSearchResponse,
             query_log={"keyword": normalized_keyword, "country": normalized_country, "limit": safe_limit},
             producer=lambda: self._search_video_trends_uncached(normalized_keyword, normalized_country, MAX_YOUTUBE_RESULTS),
+            force_live=force_live,
         )
         return _limit_youtube_response(response, safe_limit)
 
@@ -143,6 +146,7 @@ class DataSourceService:
         country: str | None = None,
         *,
         limit: int = 20,
+        force_live: bool = False,
     ) -> DataSourceCompetitorSearchResponse:
         normalized_keyword = _normalize_text(keyword)
         normalized_country = _normalize_optional_country(country) or DEFAULT_COUNTRY
@@ -155,6 +159,7 @@ class DataSourceService:
             response_model=DataSourceCompetitorSearchResponse,
             query_log={"keyword": normalized_keyword, "country": normalized_country, "limit": safe_limit},
             producer=lambda: self._search_competitors_uncached(normalized_keyword, normalized_country, 50),
+            force_live=force_live,
         )
         return _limit_competitor_response(response, safe_limit)
 
@@ -163,6 +168,8 @@ class DataSourceService:
         product_category: str,
         hs_code: str | None = None,
         country: str | None = None,
+        *,
+        force_live: bool = False,
     ) -> UnComtradeTradeFlowResponse:
         normalized_category = _normalize_text(product_category)
         normalized_country = _normalize_optional_country(country) or DEFAULT_COUNTRY
@@ -185,6 +192,7 @@ class DataSourceService:
                 normalized_hs_code,
                 normalized_country,
             ),
+            force_live=force_live,
         )
 
     async def get_content_trends(
@@ -193,6 +201,7 @@ class DataSourceService:
         country: str | None = None,
         *,
         limit: int = 20,
+        force_live: bool = False,
     ) -> DataSourceContentTrendResponse:
         normalized_keyword = _normalize_text(keyword)
         normalized_country = _normalize_optional_country(country)
@@ -204,7 +213,8 @@ class DataSourceService:
             country_key=normalized_country or GLOBAL_COUNTRY,
             response_model=DataSourceContentTrendResponse,
             query_log={"keyword": normalized_keyword, "country": normalized_country, "limit": safe_limit},
-            producer=lambda: self._get_content_trends_uncached(normalized_keyword, normalized_country, 50),
+            producer=lambda: self._get_content_trends_uncached(normalized_keyword, normalized_country, 50, force_live=force_live),
+            force_live=force_live,
         )
         return _limit_content_response(response, safe_limit)
 
@@ -283,13 +293,20 @@ class DataSourceService:
         keyword: str,
         country: str | None,
         limit: int,
+        *,
+        force_live: bool = False,
     ) -> DataSourceContentTrendResponse:
         items: list[DataSourceContentTrendItem] = []
         sources: set[str] = set()
         fallback_used = False
 
         try:
-            youtube = await self.search_video_trends(keyword, country=country or DEFAULT_COUNTRY, limit=10)
+            youtube = await self.search_video_trends(
+                keyword,
+                country=country or DEFAULT_COUNTRY,
+                limit=10,
+                force_live=force_live,
+            )
             fallback_used = fallback_used or youtube.fallback_used
             for item in youtube.items:
                 sources.add(item.platform)
@@ -357,9 +374,10 @@ class DataSourceService:
         response_model: type[T],
         query_log: dict[str, object],
         producer: Callable[[], Coroutine[Any, Any, T]],
+        force_live: bool = False,
     ) -> T:
         start = perf_counter()
-        cached = self._read_cache(provider, endpoint, query_key, country_key, response_model)
+        cached = None if force_live else self._read_cache(provider, endpoint, query_key, country_key, response_model)
         if cached is not None:
             self._write_log(
                 provider=provider,
@@ -862,14 +880,14 @@ def _response_source(response: BaseModel) -> str:
 
 
 def _safe_query_json(query: dict[str, object]) -> str:
-    safe = json.dumps(query, ensure_ascii=True, sort_keys=True, default=str)
+    safe = json.dumps(redact_mapping(query), ensure_ascii=True, sort_keys=True, default=str)
     return safe[:1000]
 
 
 def _safe_error_message(message: str | None) -> str | None:
     if not message:
         return None
-    return "Provider failed or unavailable; CSV fallback used."
+    return redact_text("Provider failed or unavailable; CSV fallback used.")
 
 
 def _find_row(path: Path, predicate: Callable[[dict[str, str]], bool]) -> dict[str, str] | None:

@@ -16,18 +16,21 @@ class DataSourceSearchTrendsRequest(BaseModel):
     query: str = Field(..., min_length=1)
     country: str | None = Field(default=None, min_length=2, max_length=2)
     limit: int = Field(default=20, ge=1, le=50)
+    force_live: bool = False
 
 
 class DataSourceSearchCompetitorsRequest(BaseModel):
     keyword: str = Field(..., min_length=1)
     country: str | None = Field(default=None, min_length=2, max_length=2)
     limit: int = Field(default=20, ge=1, le=50)
+    force_live: bool = False
 
 
 class DataSourceTradeDataRequest(BaseModel):
     product_category: str = Field(..., min_length=1)
     hs_code: str | None = Field(default=None, min_length=1, max_length=16)
     country: str | None = Field(default=None, min_length=2, max_length=3)
+    force_live: bool = False
 
 
 class DataSourceCompetitorItem(BaseModel):
@@ -90,6 +93,12 @@ class DataSourceCacheStatusItem(BaseModel):
 
 class DataSourceCacheStatusResponse(BaseModel):
     items: list[DataSourceCacheStatusItem]
+
+
+class DataSourceCacheClearResponse(BaseModel):
+    cache_table: Literal["data_source_caches"] = "data_source_caches"
+    provider: str | None = None
+    cleared_count: int
 
 
 class ApiCallLogItem(BaseModel):

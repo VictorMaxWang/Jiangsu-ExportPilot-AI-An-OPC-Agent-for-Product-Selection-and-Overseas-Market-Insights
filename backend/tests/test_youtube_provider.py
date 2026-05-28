@@ -161,6 +161,20 @@ def test_youtube_search_parses_mock_response_and_does_not_leak_key() -> None:
     assert requests
 
 
+def test_youtube_force_live_does_not_use_csv_fallback_on_api_error() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": "upstream failure"})
+
+    provider = YoutubeProvider(
+        settings=Settings(youtube_data_api_key="force-live-fake-key", enable_youtube=True),
+        transport=httpx.MockTransport(handler),
+        seed_dir=SEED_DIR,
+    )
+
+    with pytest.raises(Exception):
+        asyncio.run(provider.search_videos("home decor", country="US", max_results=1, allow_fallback=False))
+
+
 def test_youtube_search_schema_matches_contract() -> None:
     async def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(

@@ -2,61 +2,62 @@
 
 状态枚举：`not_started`、`in_progress`、`blocked`、`done`。
 
-并行规则：普通任务线程只写自己的 `docs/status/Rxx_*.md` 状态文件；`agent.md` 和 `docs/TASK_BOARD.md` 由总控线程合并。不得读取、复制或输出本地敏感凭据文件内容。
+并行规则：普通任务线程只写自己的 `docs/status/*_*.md` 状态文件；`agent.md` 和 `docs/TASK_BOARD.md` 由总控线程合并。不得读取、复制或输出本地敏感凭据文件内容。
 
 ## 已完成任务
 
-| 任务 | 名称 | 状态 | 负责人线程 | 完成说明 |
+| 任务 | 名称 | 状态 | 状态文件 | 完成说明 |
 | --- | --- | --- | --- | --- |
-| T00 | 总控文档初始化 | done | 主控开发 Agent | 已创建总控文档、架构、安全规范、任务看板、API 数据源说明和状态目录。 |
-| T01 | 项目脚手架 | done | T01 项目脚手架开发 Agent | 已创建 Next.js、FastAPI、Docker Compose、`.env.example`、README 和基础页面/API。 |
-| T02 | 数据库模型与迁移基础 | done | T02 数据库模型与迁移开发 Agent | 已完成 SQLAlchemy 模型、Alembic、基础 CRUD、公司/产品 API。 |
-| T03 | Demo 样本数据与 CSV 导入 | done | T03 CSV 导入开发 Agent | 已完成种子 CSV、导入服务和导入 API，作为 CSV fallback 基础。 |
-| T04 | 阿里云百炼统一调用服务 | done | T04 Bailian 接入开发 Agent | 已完成 Bailian/DashScope `qwen3.6-plus` 后端接入，优先读取 `DASHSCOPE_API_KEY`。 |
+| T00 | 总控文档初始化 | done | `docs/status/T00_documentation_init.md` | 创建总控文档、架构、安全规范、任务看板、API 数据源说明和状态目录。 |
+| T01 | 项目脚手架 | done | `docs/status/T01_project_scaffold.md` | 创建 Next.js、FastAPI、Docker Compose、`.env.example`、README 和基础页面/API。 |
+| T02 | 数据库模型与迁移基础 | done | `docs/status/T02_database_models.md` | 完成 SQLAlchemy 模型、Alembic、基础 CRUD、公司/产品 API。 |
+| T03 | Demo 样本数据与 CSV 导入 | done | `docs/status/T03_seed_data_import.md` | 完成种子 CSV、导入服务和导入 API，作为 CSV fallback 基础。 |
+| T04 | 阿里云百炼统一调用服务 | done | `docs/status/T04_bailian_integration.md` | 完成 Bailian/DashScope `qwen3.6-plus` 后端接入。 |
+| R05 | API 状态纠正、任务重排与安全修正 | done | `docs/status/R05_api_realignment_corrected.md` | 修正文档、`.gitignore`、能力矩阵和敏感文件忽略规则。 |
+| R06 | World Bank 与 GDELT provider | done | `docs/status/R06_worldbank_gdelt_providers.md` | 完成无 Key 宏观指标、新闻趋势 provider 和 seed fallback。 |
+| R07 | YouTube Data API provider | done | `docs/status/R07_youtube_provider.md` | 完成 YouTube 后端 provider、配置开关和 sample fallback。 |
+| R08 | Etsy Open API provider | done | `docs/status/R08_etsy_provider.md` | 完成 Etsy 后端 provider、配置开关和竞品样本 fallback。 |
+| R09 | UN Comtrade 双模式接入 | done | `docs/status/R09_un_comtrade_dual_mode.md` | 完成 no-key-first 与可选 Key 双模式，失败回落贸易样本。 |
+| R10 | Demo seed data upgrade | done | `docs/status/R10_demo_seed_data_upgrade.md` | 扩充演示样本数据，补齐内容、竞品、贸易和讨论数据。 |
+| R11 | 前端 UI realignment | done | `docs/status/R11_frontend_realigned_ui.md` | 完成前端信息架构、导航和基础组件重排。 |
+| R12 | 企业与产品管理模块 | done | `docs/status/R12_company_product_module.md` | 完成企业/产品页面、typed API client 和导入交互。 |
+| R13 | 数据源能力状态页 | done | `docs/status/R13_provider_status_page.md` | 完成 provider 状态 API、测试 API 和管理页，安全展示配置状态。 |
+| R14 | 数据源服务、缓存与调用日志 | done | `docs/status/R14_data_source_service_cache_logs.md` | 完成数据源服务抽象、缓存、调用日志和相关 API。 |
+| R15 | 市场与内容分析服务 | done | `docs/status/R15_market_content_analysis.md` | 完成市场画像、内容趋势和数据源融合分析。 |
+| R16 | 竞品与机会评分模型 | done | `docs/status/R16_competitor_scoring_model.md` | 完成竞品分析、机会评分和 AI/fallback 解释。 |
+| R17 | 出海洞察智能体工作流 | done | `docs/status/R17_agent_workflow.md` | 完成分析运行编排、步骤日志、状态查询和结果持久化。 |
+| R18 | 智能体运行页 | done | `docs/status/R18_agent_run_page.md` | 完成 `/analysis/run` 前端主流程、轮询和完成跳转。 |
+| R19 | 洞察看板与 ECharts 图表 | done | `docs/status/R19_dashboard_charts.md` | 完成分析详情看板、图表组件和 dashboard API 展示。 |
+| R20 | 营销文案生成工作流 | done | `docs/status/R20_marketing_generation.md` | 完成营销文案生成 API、前端页面和结果保存。 |
+| R21 | 出海报告生成 | done | `docs/status/R21_report_generation.md` | 完成报告生成 API、列表、详情和预览；PDF 导出保留为 v1 待办。 |
+| Q01 | 总控状态同步 | done | `docs/status/Q01_project_consistency_audit.md` | 同步总控文档、项目状态总结和一致性审计。 |
 
-## 2026-05-27 API 状态纠正后的任务
+## 下一阶段任务
 
 | 任务 | 名称 | 优先级 | 状态 | 依赖 | 主要产出 |
 | --- | --- | --- | --- | --- | --- |
-| R05 | API 状态纠正、任务重排与安全修正 | P0 | done | T00-T04 | 修正文档、更新 `.gitignore`、新增能力矩阵和 R05 状态文件。 |
-| R06 | 产品/企业前端工作流补齐 | P0 | not_started | T01、T02 | 前端 API client、企业/产品录入和列表交互。 |
-| R07 | 配置状态 API 与管理页 | P0 | not_started | T01、T04、R05 | 后端配置状态 API 与前端管理页，仅显示 configured/not_configured/public。 |
-| R08 | 外部数据源抽象层 | P0 | not_started | T02、T03、R05 | 统一 provider 接口、超时、重试、错误类型和 fallback 协议。 |
-| R09 | World Bank 数据源 | P0 | not_started | R08 | 无 Key 宏观指标客户端、标准化输出和测试。 |
-| R10 | GDELT 数据源 | P0 | not_started | R08 | 无 Key 新闻/舆情客户端、标准化输出和测试。 |
-| R11 | YouTube Data API v3 真实接入 | P0 | not_started | R08、R07 | 后端 YouTube 客户端，使用 `YOUTUBE_DATA_API_KEY`，支持 fallback。 |
-| R12 | Etsy Open API 真实接入 | P0 | not_started | R08、R07 | 后端 Etsy 客户端，使用 `ETSY_KEYSTRING` 和必要的 `ETSY_SHARED_SECRET`，支持 fallback。 |
-| R13 | UN Comtrade 双模式接入 | P1 | not_started | R08 | no-key-first 客户端，可选 `UN_COMTRADE_API_KEY`，非阻塞增强。 |
-| R14 | 市场机会评分服务 | P0 | not_started | R09-R12、T04 | 融合 P0 数据源、CSV fallback 和 AI 解释的评分服务。 |
-| R15 | 洞察看板与 ECharts 图表 | P0 | not_started | R06、R14 | 市场评分、趋势、国家对比和数据源信号图表。 |
-| R16 | 营销文案生成工作流 | P0 | not_started | R06、T04、R14 | 文案生成 API、前端展示和结果保存。 |
-| R17 | 出海报告生成与导出 | P0 | not_started | R14、R15、R16 | 报告生成 API、预览页和导出方案。 |
-| R18 | CSV fallback 演示闭环 | P0 | not_started | T03、R14 | 样本说明、fallback 路径、导入批次或演示兜底补齐。 |
-| R19 | 端到端 Demo 脚本 | P0 | not_started | R15-R18 | 比赛演示数据固化、操作脚本和可复现流程。 |
-| R20 | 测试与质量检查 | P0 | not_started | R06-R19 | 后端/前端核心测试、lint、build、集成验证。 |
-| R21 | 部署文档与运行指南 | P0 | not_started | R07、R20 | Docker Compose、Nginx、腾讯云 CVM 和环境变量配置指南。 |
-| R22 | eBay future provider | P2 | not_started | R08 | eBay 后续扩展接口设计，不阻塞 MVP。 |
-| R23 | Rakuten future provider | P2 | not_started | R08 | Rakuten 后续扩展接口设计，不阻塞 MVP。 |
-| R24 | Reddit future provider | P2 | not_started | R08 | Reddit 后续扩展接口设计，不阻塞 MVP。 |
-| R25 | 比赛最终交付整理 | P0 | not_started | R19-R21 | 交付清单、风险说明、Demo 路演材料和最终验收记录。 |
+| Q02 | 真实 API 冒烟测试与缓存绕过 | P0 | not_started | Q01 | 安全验证 live API、缓存绕过参数、provider 状态与失败回落路径。 |
+| Q03 | 安全加固、Admin 保护与密钥扫描 | P0 | not_started | Q01 | Admin 保护方案、密钥扫描记录、前端不泄露凭据验证。 |
+| Q04 | Demo 主流程体验修复 | P0 | not_started | Q01 | 企业、产品、分析、看板、营销、报告主流程体验修复清单。 |
+| Q05 | CI、依赖审计与构建稳定性 | P0 | not_started | Q01 | CI/check 脚本、依赖审计、build 稳定性记录。 |
+| Q06 | 腾讯云生产部署配置 | P0 | not_started | Q03、Q05 | CVM、Docker Compose、Nginx、环境变量和部署运行配置。 |
+| Q07 | 一键 Demo 数据与演示流程固化 | P0 | not_started | Q04、Q06 | 一键导入数据、演示脚本、现场兜底流程和操作顺序。 |
+| Q08 | 比赛材料和最终交付清单 | P0 | not_started | Q02-Q07 | 路演材料、最终交付清单、风险说明和验收记录。 |
 
-## 并行顺序
+## Q 阶段顺序
 
-1. 第 1 波：R05 必须先完成，作为后续计划和安全基线。
-2. 第 2 波：R06、R07、R08 可并行，分别处理前端工作流、配置状态和 provider 抽象层。
-3. 第 3 波：R09、R10、R11、R12 可并行；R13 可同步启动但不阻塞 MVP。
-4. 第 4 波：R14 在 P0 数据源具备标准化输出后启动。
-5. 第 5 波：R15、R16 可并行，分别做看板和文案工作流。
-6. 第 6 波：R17、R18、R19、R20 按功能完成情况增量推进。
-7. 第 7 波：R21、R22、R23、R24 可并行，其中 R22-R24 为 P2 后续扩展。
-8. 第 8 波：R25 最后完成比赛交付整理。
+1. Q01 先完成总控状态同步，消除任务板和实际状态漂移。
+2. Q02-Q05 可并行推进，分别处理真实 API、安全、主流程体验和质量稳定性。
+3. Q06 在安全和构建稳定性确认后推进生产部署配置。
+4. Q07 在主流程体验稳定后固化 Demo 数据和演示步骤。
+5. Q08 最后整理比赛材料和最终交付清单。
 
 ## 状态文件要求
 
 每个任务完成后创建独立状态文件，例如：
 
 ```text
-docs/status/R11_youtube_integration.md
+docs/status/Q02_real_api_smoke.md
 ```
 
 状态文件必须包含：

@@ -7,6 +7,7 @@ from app.schemas import ContentTrendAnalysisRequest, ContentTrendAnalysisRespons
 from app.services.ai import BailianClient
 from app.services.analysis import ContentTrendAnalysisService
 from app.services.data_sources import DataSourceService, get_data_source_service
+from app.utils.redaction import redact_text
 
 
 router = APIRouter()
@@ -27,7 +28,7 @@ async def analyze_content_trends(
     try:
         return await service.analyze(request.keyword, request.country)
     except ValueError as exc:
-        raise _validation_exception(str(exc)) from exc
+        raise _validation_exception(redact_text(str(exc)) or "") from exc
 
 
 def _validation_exception(message: str) -> HTTPException:

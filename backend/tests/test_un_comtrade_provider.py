@@ -92,7 +92,7 @@ def test_un_comtrade_trade_flow_no_key_first_and_normalizes_rows() -> None:
     assert len(requests) == 1
 
 
-@pytest.mark.parametrize("status_code", [401, 403, 429])
+@pytest.mark.parametrize("status_code", [401, 403])
 def test_un_comtrade_trade_flow_retries_with_optional_key(status_code: int) -> None:
     requests: list[httpx.Request] = []
 
@@ -137,14 +137,12 @@ def test_un_comtrade_trade_flow_retries_with_optional_key(status_code: int) -> N
     assert len(requests) == 2
 
 
-def test_un_comtrade_trade_flow_retries_on_subscription_error_payload() -> None:
+def test_un_comtrade_trade_flow_does_not_retry_on_subscription_error_payload() -> None:
     requests: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if len(requests) == 1:
-            return httpx.Response(200, json={"data": [], "error": "missing subscription-key"})
-        return httpx.Response(200, json={"data": [{"period": "2024", "primaryValue": 77, "qty": 7}], "error": ""})
+        return httpx.Response(200, json={"data": [], "error": "missing subscription-key"})
 
     provider = UnComtradeProvider(
         settings=Settings(enable_un_comtrade=True, un_comtrade_api_key="payload-fake-key"),
@@ -156,9 +154,34 @@ def test_un_comtrade_trade_flow_retries_on_subscription_error_payload() -> None:
 
     result = asyncio.run(provider.get_trade_flow(start_year=2024, end_year=2024))
 
-    assert result.auth_mode == "key"
-    assert result.records[0].trade_value_usd == Decimal("77")
+    assert result.auth_mode == "fallback"
+    assert result.fallback_used is True
+    assert len(requests) == 1
     assert "payload-fake-key" not in result.model_dump_json()
+
+
+def test_un_comtrade_trade_flow_does_not_retry_429_with_key() -> None:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert "subscription-key" not in request.url.params
+        return httpx.Response(429, json={"error": "quota", "data": []})
+
+    provider = UnComtradeProvider(
+        settings=Settings(enable_un_comtrade=True, un_comtrade_api_key="quota-fake-key"),
+        no_key_endpoint="https://comtrade.example/preview",
+        key_endpoint="https://comtrade.example/keyed",
+        transport=httpx.MockTransport(handler),
+        seed_dir=SEED_DIR,
+    )
+
+    result = asyncio.run(provider.get_trade_flow(hs_code="6302", start_year=2024, end_year=2024))
+
+    assert len(requests) == 1
+    assert result.fallback_used is True
+    assert result.auth_mode == "fallback"
+    assert "quota-fake-key" not in result.model_dump_json()
 
 
 @pytest.mark.parametrize("status_code", [401, 403, 429, 500])

@@ -38,11 +38,11 @@ export default function DashboardPage({ searchParams }: DashboardPageProps) {
       </div>
       <div className="mt-5">
         <EmptyState
-          title="尚未选择分析结果"
-          description="请先在运行分析页选择企业、产品和目标国家，待工作流完成后打开本次分析的市场看板。"
+          title="请先运行一次分析"
+          description="完成智能体分析后，系统会带着 analysis_id 打开本次市场看板。"
           action={
             <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/analysis/run">
-              运行分析
+              进入演示流程
             </Link>
           }
         />
@@ -51,7 +51,7 @@ export default function DashboardPage({ searchParams }: DashboardPageProps) {
         <FallbackNotice
           source="sample"
           title="Demo 数据说明"
-          description="当前 Demo 使用 World Bank、GDELT、YouTube、Etsy、UN Comtrade/样本数据与 CSV fallback；平台竞品样本不代表真实销量。"
+          description="当前 Demo 使用公开 API、缓存、样本数据与 CSV fallback。竞品样本不代表真实销量，仅作为价格与内容信号。"
         />
       </div>
     </div>

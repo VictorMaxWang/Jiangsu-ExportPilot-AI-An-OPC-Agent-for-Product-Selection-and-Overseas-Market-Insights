@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.schemas import ProviderStatusResponse, ProviderTestResponse
 from app.schemas.provider_status import ProviderId
@@ -18,6 +18,7 @@ def get_provider_status(
 @router.post("/test/{provider}", response_model=ProviderTestResponse)
 async def test_provider(
     provider: ProviderId,
+    force_live: bool = Query(default=False),
     service: ProviderStatusService = Depends(get_provider_status_service),
 ) -> ProviderTestResponse:
-    return await service.test_provider(provider)
+    return await service.test_provider(provider, force_live=force_live)

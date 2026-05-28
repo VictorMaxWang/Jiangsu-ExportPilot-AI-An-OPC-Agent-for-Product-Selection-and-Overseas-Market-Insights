@@ -72,10 +72,14 @@ Compose 服务约定：
 
 - `DATABASE_URL`：后端连接 PostgreSQL 的地址，Compose 内部主机名使用 `postgres`。
 - `REDIS_URL`：后端连接 Redis 的地址，Compose 内部主机名使用 `redis`。
-- `DASHSCOPE_API_KEY`、`BAILIAN_API_KEY`：阿里云百炼 / DashScope API Key，仅后端读取。后续任务应统一到一个后端配置入口。
+- `DASHSCOPE_API_KEY`、`BAILIAN_API_KEY`：阿里云百炼 / DashScope API Key，仅后端读取。当前后端优先读取 `DASHSCOPE_API_KEY`，并兼容 `BAILIAN_API_KEY`。
 - `BAILIAN_BASE_URL`：默认 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
 - `BAILIAN_MODEL`：默认 `qwen3.6-plus`。
-- `EBAY_CLIENT_ID`、`EBAY_CLIENT_SECRET`、`UN_COMTRADE_API_KEY`、`RAKUTEN_APPLICATION_ID`、`RAKUTEN_APP_ID`、`YOUTUBE_DATA_API_KEY`、`YOUTUBE_API_KEY`、`ETSY_KEYSTRING`、`ETSY_API_KEY`、`ETSY_SHARED_SECRET`、`REDDIT_CLIENT_ID`、`REDDIT_CLIENT_SECRET`、`REDDIT_REDIRECT_URI`：外部数据源凭据或回调地址。
+- `YOUTUBE_DATA_API_KEY`：YouTube Data API v3 后端凭据；缺失、禁用或失败时使用 seed fallback。
+- `ETSY_KEYSTRING`、`ETSY_SHARED_SECRET`：Etsy Open API 后端凭据；缺失、禁用或失败时使用 seed fallback。
+- `UN_COMTRADE_API_KEY`：UN Comtrade 可选凭据；后端优先 no-key-first，失败时回落到 seed fallback。
+- `ENABLE_YOUTUBE`、`ENABLE_ETSY`、`ENABLE_UN_COMTRADE`：控制对应真实 provider 是否启用。
+- `EBAY_CLIENT_ID`、`EBAY_CLIENT_SECRET`、`RAKUTEN_APP_ID`、`RAKUTEN_APPLICATION_ID`、`REDDIT_CLIENT_ID`、`REDDIT_CLIENT_SECRET`、`REDDIT_REDIRECT_URI`：P2 future provider 预留配置，当前不作为 MVP runtime 依赖。
 - `FRONTEND_URL`、`BACKEND_URL`、`NEXT_PUBLIC_API_BASE_URL`、`CORS_ORIGINS`：本地和部署访问地址配置。
 
 ## 安全说明
@@ -84,4 +88,4 @@ Compose 服务约定：
 - 第三方 API Key 只能由后端从环境变量读取，不能进入前端代码、构建产物、页面响应或日志。
 - 前端只能展示“已配置 / 未配置”等状态，不能展示密钥明文、部分明文、哈希或可恢复的掩码。
 - 日志、异常、截图和导出的报告中不得包含密钥、认证头或完整敏感连接串。
-- 如果发现密钥被写入仓库或日志，应立即停止相关任务，在对应 `docs/status/Txx_*.md` 记录风险位置和影响范围，不写入密钥明文。
+- 如果发现密钥被写入仓库或日志，应立即停止相关任务，在对应 `docs/status/*_*.md` 记录风险位置和影响范围，不写入密钥明文。

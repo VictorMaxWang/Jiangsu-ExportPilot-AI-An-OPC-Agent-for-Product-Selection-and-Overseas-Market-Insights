@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import ApiCallLog, DataSourceCache
 from app.schemas import (
+    ApiCallLogItem,
     ApiCallLogListResponse,
     DataSourceCacheStatusItem,
     DataSourceCacheStatusResponse,
@@ -22,6 +23,7 @@ from app.schemas import (
     WorldBankCountryResponse,
 )
 from app.services.data_sources import DataSourceService, get_data_source_service
+from app.utils.redaction import redact_text
 
 
 router = APIRouter()
@@ -94,7 +96,23 @@ def get_api_call_logs(
 
     total = db.scalar(count_statement) or 0
     items = db.scalars(statement.order_by(ApiCallLog.called_at.desc(), ApiCallLog.id.desc()).offset(skip).limit(limit)).all()
-    return ApiCallLogListResponse(items=list(items), total=total)
+    return ApiCallLogListResponse(
+        items=[
+            ApiCallLogItem(
+                id=item.id,
+                provider=item.provider,
+                endpoint=item.endpoint,
+                query=redact_text(item.query) or "",
+                status=item.status,
+                response_time_ms=item.response_time_ms,
+                fallback_used=item.fallback_used,
+                error_message=redact_text(item.error_message),
+                called_at=item.called_at,
+            )
+            for item in items
+        ],
+        total=total,
+    )
 
 
 @router.post("/search-competitors", response_model=DataSourceCompetitorSearchResponse)
@@ -103,9 +121,14 @@ async def search_competitors(
     service: DataSourceService = Depends(get_data_source_service),
 ) -> DataSourceCompetitorSearchResponse:
     try:
-        return await service.search_competitors(request.keyword, country=request.country, limit=request.limit)
+        return await service.search_competitors(
+            request.keyword,
+            country=request.country,
+            limit=request.limit,
+            force_live=request.force_live,
+        )
     except ValueError as exc:
-        raise _validation_exception(str(exc)) from exc
+        raise _validation_exception(redact_text(str(exc)) or "") from exc
 
 
 @router.post("/search-trends", response_model=DataSourceContentTrendResponse)
@@ -114,9 +137,14 @@ async def search_trends(
     service: DataSourceService = Depends(get_data_source_service),
 ) -> DataSourceContentTrendResponse:
     try:
-        return await service.get_content_trends(request.query, country=request.country, limit=request.limit)
+        return await service.get_content_trends(
+            request.query,
+            country=request.country,
+            limit=request.limit,
+            force_live=request.force_live,
+        )
     except ValueError as exc:
-        raise _validation_exception(str(exc)) from exc
+        raise _validation_exception(redact_text(str(exc)) or "") from exc
 
 
 @router.post("/market-profile", response_model=WorldBankCountryResponse)
@@ -127,7 +155,7 @@ async def get_market_profile(
     try:
         return await service.get_market_profile(request.country_code)
     except ValueError as exc:
-        raise _validation_exception(str(exc)) from exc
+        raise _validation_exception(redact_text(str(exc)) or "") from exc
 
 
 @router.post("/trade-data", response_model=UnComtradeTradeFlowResponse)
@@ -140,9 +168,10 @@ async def get_trade_data(
             request.product_category,
             hs_code=request.hs_code,
             country=request.country,
+            force_live=request.force_live,
         )
     except ValueError as exc:
-        raise _validation_exception(str(exc)) from exc
+        raise _validation_exception(redact_text(str(exc)) or "") from exc
 
 
 def _validation_exception(message: str) -> HTTPException:

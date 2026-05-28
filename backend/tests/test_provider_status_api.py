@@ -79,6 +79,7 @@ def test_provider_status_endpoint_uses_safe_configured_states(monkeypatch: pytes
     monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-fake-value")
     monkeypatch.setenv("YOUTUBE_DATA_API_KEY", "youtube-fake-value")
     monkeypatch.setenv("ETSY_KEYSTRING", "etsy-fake-value")
+    monkeypatch.setenv("ETSY_SHARED_SECRET", "etsy-fake-shared-value")
     monkeypatch.setenv("UN_COMTRADE_API_KEY", "un-fake-value")
     monkeypatch.setenv("EBAY_CLIENT_ID", "ebay-fake-value")
     monkeypatch.setenv("EBAY_CLIENT_SECRET", "ebay-fake-shared-value")
@@ -187,6 +188,71 @@ def test_provider_test_endpoint_maps_live_and_fallback_payloads() -> None:
         assert response.status_code == 200
         assert response.json()["sample_count"] > 0
         _assert_no_secret_markers(response.text)
+
+
+def test_provider_force_live_youtube_uses_live_parameters() -> None:
+    provider = StubYoutubeProvider()
+    service = ProviderStatusService(
+        settings=Settings(youtube_data_api_key="youtube-fake-value"),
+        youtube_provider=provider,
+    )
+
+    with _override_provider_service(service):
+        with TestClient(app) as client:
+            response = client.post("/api/admin/providers/test/youtube?force_live=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["cache_bypassed"] is True
+    assert payload["live_search_success"] is True
+    assert payload["fallback_available"] is True
+    assert provider.calls == [("home decor", "US", 1, False)]
+    _assert_no_secret_markers(response.text)
+
+
+def test_provider_force_live_etsy_reports_listing_access_limitation() -> None:
+    provider = StubEtsyProvider(
+        listing_error_code="credentials_valid_but_listing_search_requires_oauth_or_approval"
+    )
+    service = ProviderStatusService(
+        settings=Settings(etsy_keystring="etsy-fake-value", etsy_shared_secret="etsy-fake-shared-value"),
+        etsy_provider=provider,
+    )
+
+    with _override_provider_service(service):
+        with TestClient(app) as client:
+            response = client.post("/api/admin/providers/test/etsy?force_live=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "credentials_valid_but_listing_search_requires_oauth_or_approval"
+    assert payload["live_ping_success"] is True
+    assert payload["live_search_success"] is False
+    assert payload["fallback_available"] is True
+    assert payload["error_code"] == "credentials_valid_but_listing_search_requires_oauth_or_approval"
+    assert provider.ping_calls == 1
+    assert provider.calls == [("home decor", "US", 1, False)]
+    _assert_no_secret_markers(response.text)
+
+
+def test_provider_force_live_un_comtrade_reports_live_fields() -> None:
+    provider = StubUnComtradeProvider()
+    service = ProviderStatusService(settings=Settings(), un_comtrade_provider=provider)
+
+    with _override_provider_service(service):
+        with TestClient(app) as client:
+            response = client.post("/api/admin/providers/test/un_comtrade?force_live=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["cache_bypassed"] is True
+    assert payload["live_search_success"] is True
+    assert payload["fallback_available"] is True
+    assert payload["auth_mode"] == "no_key"
+    assert provider.calls == [("CHN", "USA", "6302", "export", 2024, 2024)]
+    _assert_no_secret_markers(response.text)
 
 
 def test_provider_test_endpoint_handles_empty_payload_as_unavailable() -> None:
@@ -321,13 +387,17 @@ class StubGdeltProvider:
 class StubYoutubeProvider:
     def __init__(self, *, fallback: bool = False) -> None:
         self.fallback = fallback
+        self.calls: list[tuple[str, str, int, bool]] = []
 
     async def search_videos(
         self,
         keyword: str,
         country: str = "US",
         max_results: int = 10,
+        *,
+        allow_fallback: bool = True,
     ) -> YoutubeSearchResponse:
+        self.calls.append((keyword, country, max_results, allow_fallback))
         return YoutubeSearchResponse(
             keyword=keyword,
             country=country,
@@ -344,15 +414,27 @@ class StubYoutubeProvider:
 
 
 class StubEtsyProvider:
-    def __init__(self, *, fallback: bool = False) -> None:
+    def __init__(self, *, fallback: bool = False, listing_error_code: str | None = None) -> None:
         self.fallback = fallback
+        self.listing_error_code = listing_error_code
+        self.calls: list[tuple[str, str, int, bool]] = []
+        self.ping_calls = 0
+
+    async def openapi_ping(self) -> bool:
+        self.ping_calls += 1
+        return True
 
     async def search_listings(
         self,
         keyword: str,
         country: str = "US",
         limit: int = 20,
+        *,
+        allow_fallback: bool = True,
     ) -> EtsySearchResponse:
+        self.calls.append((keyword, country, limit, allow_fallback))
+        if self.listing_error_code and not allow_fallback:
+            raise StubProviderError(self.listing_error_code)
         return EtsySearchResponse(
             keyword=keyword,
             country=country,
@@ -371,9 +453,16 @@ class StubEtsyProvider:
         )
 
 
+class StubProviderError(Exception):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__("sanitized stub provider failure")
+
+
 class StubUnComtradeProvider:
     def __init__(self, *, fallback: bool = False) -> None:
         self.fallback = fallback
+        self.calls: list[tuple[str, str, str, str, int, int]] = []
 
     async def get_trade_flow(
         self,
@@ -384,6 +473,7 @@ class StubUnComtradeProvider:
         start_year: int = 2024,
         end_year: int = 2024,
     ) -> UnComtradeTradeFlowResponse:
+        self.calls.append((reporter, partner, hs_code, flow, start_year, end_year))
         return UnComtradeTradeFlowResponse(
             hs_code=hs_code,
             reporter=reporter,

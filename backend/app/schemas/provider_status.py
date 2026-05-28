@@ -29,7 +29,14 @@ ProviderCapabilityStatus = Literal[
 ]
 
 ProviderMvpPriority = Literal["P0", "P1", "P2"]
-ProviderTestStatus = Literal["success", "fallback", "pending", "unavailable"]
+ProviderTestStatus = Literal[
+    "success",
+    "fallback",
+    "pending",
+    "unavailable",
+    "credentials_valid_but_listing_search_requires_oauth_or_approval",
+]
+ProviderTestAuthMode = Literal["no_key", "key", "fallback"]
 
 
 class ProviderStatusItem(BaseModel):
@@ -55,3 +62,9 @@ class ProviderTestResponse(BaseModel):
     message: str
     sample_count: int
     error_code: str | None = None
+    configured: bool = False
+    live_ping_success: bool | None = None
+    live_search_success: bool | None = None
+    fallback_available: bool = False
+    cache_bypassed: bool = False
+    auth_mode: ProviderTestAuthMode | None = None

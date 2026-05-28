@@ -6,6 +6,7 @@ import { ErrorState } from "../../_components/ErrorState";
 import { LoadingState } from "../../_components/LoadingState";
 import { ProviderStatusBadge } from "../../_components/ProviderStatusBadge";
 import {
+  ApiError,
   type ProviderId,
   type ProviderStatusItem,
   type ProviderTestResponse,
@@ -16,24 +17,65 @@ import {
 
 type TestResultMap = Partial<Record<ProviderId, ProviderTestResponse>>;
 
-export function ProviderStatusDashboard() {
+type ProviderStatusDashboardProps = {
+  requireAdminPassword?: boolean;
+};
+
+export function ProviderStatusDashboard({ requireAdminPassword = false }: ProviderStatusDashboardProps) {
+  const [adminPassword, setAdminPassword] = useState("");
   const [providers, setProviders] = useState<ProviderStatusItem[]>([]);
   const [lastTests, setLastTests] = useState<TestResultMap>({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!requireAdminPassword);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [testingProvider, setTestingProvider] = useState<ProviderId | null>(null);
 
   useEffect(() => {
-    void loadStatuses();
-  }, []);
+    if (requireAdminPassword) {
+      setLoading(false);
+      return;
+    }
+
+    let active = true;
+    async function loadInitialStatuses() {
+      setLoading(true);
+      setErrorMessage(null);
+      try {
+        const payload = await listProviderStatuses();
+        if (active) {
+          setProviders(payload.providers);
+        }
+      } catch (error) {
+        if (active) {
+          setErrorMessage(getFriendlyErrorMessage(error));
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadInitialStatuses();
+    return () => {
+      active = false;
+    };
+  }, [requireAdminPassword]);
 
   async function loadStatuses() {
+    if (requireAdminPassword && !adminPassword.trim()) {
+      setErrorMessage("请输入 Admin Password 后加载状态。");
+      return;
+    }
+
     setLoading(true);
     setErrorMessage(null);
     try {
-      const payload = await listProviderStatuses();
+      const payload = await listProviderStatuses({ adminPassword });
       setProviders(payload.providers);
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setProviders([]);
+      }
       setErrorMessage(getFriendlyErrorMessage(error));
     } finally {
       setLoading(false);
@@ -41,11 +83,21 @@ export function ProviderStatusDashboard() {
   }
 
   async function runProviderTest(provider: ProviderId) {
+    if (requireAdminPassword && !adminPassword.trim()) {
+      setErrorMessage("请输入 Admin Password 后执行测试。");
+      return;
+    }
+
     setTestingProvider(provider);
+    setErrorMessage(null);
     try {
-      const result = await testProvider(provider);
+      const result = await testProvider(provider, { adminPassword });
       setLastTests((current) => ({ ...current, [provider]: result }));
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setErrorMessage("Admin Password 无效或缺失，未执行测试。");
+        return;
+      }
       setLastTests((current) => ({
         ...current,
         [provider]: {
@@ -57,6 +109,12 @@ export function ProviderStatusDashboard() {
           message: "后端状态测试失败。",
           sample_count: 0,
           error_code: "FRONTEND_TEST_REQUEST_FAILED",
+          configured: false,
+          live_ping_success: null,
+          live_search_success: null,
+          fallback_available: false,
+          cache_bypassed: false,
+          auth_mode: null,
         },
       }));
     } finally {
@@ -71,30 +129,52 @@ export function ProviderStatusDashboard() {
     }, {});
   }, [providers]);
 
+  const passwordPanel = (
+    <AdminPasswordPanel
+      adminPassword={adminPassword}
+      requireAdminPassword={requireAdminPassword}
+      onAdminPasswordChange={setAdminPassword}
+      onLoad={() => void loadStatuses()}
+    />
+  );
+
   if (loading) {
-    return <LoadingState label="正在加载数据源能力状态" rows={6} />;
+    return (
+      <div className="grid gap-5">
+        {passwordPanel}
+        <LoadingState label="正在加载数据源能力状态" rows={6} />
+      </div>
+    );
   }
 
   if (errorMessage) {
     return (
-      <ErrorState
-        title="数据源状态暂不可用"
-        message={errorMessage}
-        retryAction={
-          <button
-            type="button"
-            onClick={() => void loadStatuses()}
-            className="rounded-md bg-red-700 px-3 py-2 text-sm font-semibold text-white hover:bg-red-800"
-          >
-            重新加载
-          </button>
-        }
-      />
+      <div className="grid gap-5">
+        {passwordPanel}
+        <ErrorState
+          title="数据源状态暂不可用"
+          message={errorMessage}
+          retryAction={
+            <button
+              type="button"
+              onClick={() => void loadStatuses()}
+              className="rounded-md bg-red-700 px-3 py-2 text-sm font-semibold text-white hover:bg-red-800"
+            >
+              重新加载
+            </button>
+          }
+        />
+      </div>
     );
+  }
+
+  if (requireAdminPassword && providers.length === 0) {
+    return <div className="grid gap-5">{passwordPanel}</div>;
   }
 
   return (
     <div className="grid gap-5">
+      {passwordPanel}
       <div className="grid gap-3 sm:grid-cols-3">
         {(["P0", "P1", "P2"] as const).map((priority) => (
           <div key={priority} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -149,6 +229,59 @@ export function ProviderStatusDashboard() {
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminPasswordPanel({
+  adminPassword,
+  requireAdminPassword,
+  onAdminPasswordChange,
+  onLoad,
+}: {
+  adminPassword: string;
+  requireAdminPassword: boolean;
+  onAdminPasswordChange: (value: string) => void;
+  onLoad: () => void;
+}) {
+  if (!requireAdminPassword) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-600">
+        这里只显示配置状态，不显示密钥。
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4">
+      <div>
+        <p className="text-sm font-semibold text-ink">Admin Password</p>
+        <p className="mt-1 text-sm leading-6 text-slate-600">
+          这里只显示配置状态，不显示密钥。密码仅保存在当前页面会话状态中，刷新后会清空。
+        </p>
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <input
+          type="password"
+          value={adminPassword}
+          onChange={(event) => onAdminPasswordChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              onLoad();
+            }
+          }}
+          className="min-h-10 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm text-ink outline-none transition focus:border-ink focus:ring-2 focus:ring-slate-200"
+          placeholder="输入 Admin Password"
+          autoComplete="current-password"
+        />
+        <button
+          type="button"
+          onClick={onLoad}
+          className="min-h-10 rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+        >
+          加载状态
+        </button>
       </div>
     </div>
   );

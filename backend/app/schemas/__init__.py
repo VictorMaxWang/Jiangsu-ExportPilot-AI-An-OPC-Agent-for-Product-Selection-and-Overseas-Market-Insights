@@ -45,6 +45,7 @@ from app.schemas.data_sources import (
     ApiCallLogItem,
     ApiCallLogListResponse,
     ApiCallStatus,
+    DataSourceCacheClearResponse,
     DataSourceCacheStatusItem,
     DataSourceCacheStatusResponse,
     DataSourceCompetitorItem,
@@ -136,6 +137,7 @@ from app.schemas.provider_status import (
     ProviderStatusItem,
     ProviderStatusResponse,
     ProviderTestResponse,
+    ProviderTestAuthMode,
     ProviderTestStatus,
 )
 from app.schemas.reports import (
@@ -197,6 +199,7 @@ __all__ = [
     "ContentTrendSourceItem",
     "ContentTrendUpdate",
     "DataProviderSyncResponse",
+    "DataSourceCacheClearResponse",
     "DataSourceCacheStatusItem",
     "DataSourceCacheStatusResponse",
     "DataSourceCompetitorItem",
@@ -260,6 +263,7 @@ __all__ = [
     "ProviderMvpPriority",
     "ProviderStatusItem",
     "ProviderStatusResponse",
+    "ProviderTestAuthMode",
     "ProviderTestResponse",
     "ProviderTestStatus",
     "ReportCreate",

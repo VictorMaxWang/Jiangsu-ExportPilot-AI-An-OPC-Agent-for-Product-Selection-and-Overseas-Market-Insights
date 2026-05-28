@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  ci:
+    name: Backend and frontend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: sqlite:///${{ runner.temp }}/supin-ci-test.db
+      DASHSCOPE_API_KEY: ""
+      BAILIAN_API_KEY: ""
+      YOUTUBE_DATA_API_KEY: ""
+      ETSY_KEYSTRING: ""
+      ETSY_SHARED_SECRET: ""
+      UN_COMTRADE_API_KEY: ""
+      EBAY_CLIENT_ID: ""
+      EBAY_CLIENT_SECRET: ""
+      RAKUTEN_APP_ID: ""
+      RAKUTEN_APPLICATION_ID: ""
+      REDDIT_CLIENT_ID: ""
+      REDDIT_CLIENT_SECRET: ""
+      ENABLE_YOUTUBE: "true"
+      ENABLE_ETSY: "true"
+      ENABLE_UN_COMTRADE: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+      PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pycache
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run backend tests
+        working-directory: backend
+        run: python -m pytest tests -q
+
+      - name: Compile backend sources
+        working-directory: backend
+        run: python -m compileall -q app tests
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Record npm audit
+        working-directory: frontend
+        run: npm audit --json > npm-audit.json || true
+
+      - name: Upload npm audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-json
+          path: frontend/npm-audit.json
+          if-no-files-found: error
+
+      - name: Type check frontend
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: frontend
+        timeout-minutes: 8
+        run: npm run build

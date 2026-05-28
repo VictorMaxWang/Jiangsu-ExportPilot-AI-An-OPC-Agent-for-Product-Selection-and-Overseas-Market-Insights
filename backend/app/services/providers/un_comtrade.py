@@ -303,8 +303,7 @@ def _api_params(
 
 
 def _response_payload(response: httpx.Response) -> dict[str, Any]:
-    body = response.text
-    retry_with_key = response.status_code in {401, 403, 429} or _body_requests_key_or_quota(body)
+    retry_with_key = response.status_code in {401, 403}
     if response.status_code >= 400:
         raise _UnComtradeApiError("UN Comtrade returned an error status", retry_with_key=retry_with_key)
 
@@ -321,7 +320,7 @@ def _response_payload(response: httpx.Response) -> dict[str, Any]:
     if error_text and (not isinstance(rows, list) or not rows):
         raise _UnComtradeApiError(
             "UN Comtrade returned an error payload",
-            retry_with_key=_body_requests_key_or_quota(error_text),
+            retry_with_key=False,
         )
     return payload
 

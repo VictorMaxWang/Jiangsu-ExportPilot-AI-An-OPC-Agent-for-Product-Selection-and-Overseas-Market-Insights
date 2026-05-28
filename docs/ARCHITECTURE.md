@@ -108,15 +108,18 @@ AI 输出必须记录：
 
 ## 外部 API 接入
 
-所有外部 API 通过后端 `clients/` 封装：
+所有外部 API 通过后端 provider/service 封装。当前 P0/P1 runtime 数据源为：
 
 - World Bank：宏观经济与国家指标。
 - GDELT：新闻与舆情趋势。
-- eBay Browse API：跨境电商商品与价格参考。
 - UN Comtrade：贸易流向与品类进出口数据。
-- Rakuten Ichiba：日本市场商品信号。
 - YouTube Data API：视频内容趋势。
 - Etsy Open API：手工与设计类商品趋势。
+
+P2 future provider 仅保留扩展方向，当前没有 runtime client，不阻塞 MVP：
+
+- eBay Browse API：跨境电商商品与价格参考。
+- Rakuten Ichiba：日本市场商品信号。
 - Reddit API：社区讨论和用户需求信号。
 
 每个客户端应输出统一结构，便于评分服务消费。
@@ -125,8 +128,8 @@ AI 输出必须记录：
 
 CSV fallback 是比赛演示的核心兜底能力：
 
-- 样本文件放在 `data/samples/`。
-- 标准化后的 fallback 数据放在 `data/fallback/` 或数据库快照中。
+- 当前样本和 fallback 文件集中放在 `data/seed/`。
+- 标准化后的 fallback 数据可来自 `data/seed/*` 或数据库快照。
 - 当 API Key 缺失、配额不足、网络失败或接口变更时，后端返回 fallback 数据并标记来源。
 - 前端需要清晰显示数据来源，例如 `API`、`CSV fallback`、`mock sample`。
 

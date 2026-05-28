@@ -38,6 +38,7 @@ from app.services.ai import (
     generate_product_keywords,
 )
 from app.services.importers import csv_importer
+from app.utils.redaction import redact_mapping, redact_text
 
 
 router = APIRouter()
@@ -184,7 +185,7 @@ def _validate_import_payload(payload: Any) -> CsvImportRequest:
     try:
         return CsvImportRequest.model_validate(payload)
     except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=redact_mapping(exc.errors())) from exc
 
 
 def _run_product_import(
@@ -205,7 +206,7 @@ def _run_product_import(
     except csv_importer.CsvImportValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.result.model_dump(mode="json")) from exc
     except csv_importer.CsvImportRequestError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise HTTPException(status_code=exc.status_code, detail=redact_text(exc.message)) from exc
 
 
 def _product_to_keyword_request(
@@ -250,7 +251,7 @@ def _to_ai_http_exception(exc: BailianError) -> HTTPException:
         status_code=http_status,
         detail={
             "code": exc.code,
-            "message": str(exc),
+            "message": redact_text(str(exc)),
             "provider": "bailian",
         },
     )

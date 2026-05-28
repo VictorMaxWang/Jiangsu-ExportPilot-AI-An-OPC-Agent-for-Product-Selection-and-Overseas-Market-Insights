@@ -28,6 +28,7 @@ from app.services.ai.prompts import (
     build_marketing_copy_messages,
     build_report_section_messages,
 )
+from app.utils.redaction import redact_text
 
 
 router = APIRouter()
@@ -130,7 +131,7 @@ def _to_http_exception(exc: BailianError) -> HTTPException:
         status_code=http_status,
         detail={
             "code": exc.code,
-            "message": str(exc),
+            "message": redact_text(str(exc)),
             "provider": "bailian",
         },
     )

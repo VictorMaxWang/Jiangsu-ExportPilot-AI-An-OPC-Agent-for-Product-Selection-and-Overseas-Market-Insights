@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../../_components/EmptyState";
 import { ErrorState } from "../../_components/ErrorState";
@@ -66,6 +67,7 @@ export function ProductsWorkspace() {
   const [form, setForm] = useState<ProductFormState>(emptyProductForm);
   const [keywordForm, setKeywordForm] = useState<KeywordState>({ target_country: "JP", target_platforms: "Amazon, Rakuten" });
   const [keywordResult, setKeywordResult] = useState<ProductKeywordGenerationResponse | null>(null);
+  const [keywordFallback, setKeywordFallback] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<CsvImportResult | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,10 +90,11 @@ export function ProductsWorkspace() {
     setLoading(true);
     setError(null);
     try {
-      const [companyResponse, productResponse] = await Promise.all([listCompanies(), listProducts()]);
+      const companyResponse = await listCompanies();
       setCompanies(companyResponse.items);
-      setProducts(productResponse.items);
       const firstCompanyId = companyResponse.items[0]?.id ?? null;
+      const productResponse = await listProducts(firstCompanyId ?? undefined);
+      setProducts(productResponse.items);
       setSelectedCompanyId((current) => current ?? firstCompanyId);
       setForm((current) => ({
         ...current,
@@ -139,6 +142,7 @@ export function ProductsWorkspace() {
   function startCreate() {
     setEditingId(null);
     setKeywordResult(null);
+    setKeywordFallback(null);
     setForm({
       ...emptyProductForm,
       company_id: selectedCompanyId ? String(selectedCompanyId) : companies[0] ? String(companies[0].id) : "",
@@ -149,6 +153,7 @@ export function ProductsWorkspace() {
     setEditingId(product.id);
     setSelectedProductId(product.id);
     setKeywordResult(null);
+    setKeywordFallback(null);
     setForm({
       company_id: String(product.company_id),
       product_name_cn: product.product_name_cn,
@@ -263,6 +268,8 @@ export function ProductsWorkspace() {
     setGenerating(true);
     setError(null);
     setNotice(null);
+    setKeywordResult(null);
+    setKeywordFallback(null);
     try {
       const result = await generateProductKeywords(selectedProduct.id, {
         target_country: optionalText(keywordForm.target_country),
@@ -277,10 +284,27 @@ export function ProductsWorkspace() {
       );
       setNotice(`关键词已生成，新增保存 ${result.saved_keywords_count} 个关键词。`);
     } catch (requestError) {
-      setError(getFriendlyErrorMessage(requestError));
+      const message = getFriendlyErrorMessage(requestError);
+      setKeywordFallback(
+        `关键词生成暂时无法调用 AI：${message}。演示可继续使用 CSV 样本关键词、英文品名和产品描述完成分析。`,
+      );
     } finally {
       setGenerating(false);
     }
+  }
+
+  if (!loading && companies.length === 0) {
+    return (
+      <EmptyState
+        title="请先创建企业"
+        description="产品必须归属于企业。先录入一家示例企业后，即可一键导入南通家纺样本产品。"
+        action={
+          <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/companies">
+            去创建企业
+          </Link>
+        }
+      />
+    );
   }
 
   return (
@@ -410,7 +434,24 @@ export function ProductsWorkspace() {
           {loading ? (
             <LoadingState label="正在加载产品" rows={4} />
           ) : products.length === 0 ? (
-            <EmptyState title="暂无产品" description="创建产品或导入 product_catalog.csv 后将显示在这里。" />
+            <EmptyState
+              title="暂无产品"
+              description="当前企业还没有产品，可直接导入内置的南通家纺样本，快速进入演示分析。"
+              action={
+                selectedCompanyId ? (
+                  <button
+                    className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                    disabled={importing}
+                    type="button"
+                    onClick={() => void runSampleImport("insert")}
+                  >
+                    {importing ? "导入中" : "一键导入南通家纺样本产品"}
+                  </button>
+                ) : (
+                  <span className="text-sm text-slate-500">请先选择导入企业</span>
+                )
+              }
+            />
           ) : (
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <table className="w-full border-collapse text-left text-sm">
@@ -482,6 +523,13 @@ export function ProductsWorkspace() {
                 >
                   {generating ? "生成中" : "生成产品关键词"}
                 </button>
+                {keywordFallback ? (
+                  <FallbackNotice
+                    source="csv"
+                    title="关键词生成已切换为演示兜底"
+                    description={keywordFallback}
+                  />
+                ) : null}
                 {keywordResult ? <KeywordResult result={keywordResult} /> : null}
               </div>
             </div>
