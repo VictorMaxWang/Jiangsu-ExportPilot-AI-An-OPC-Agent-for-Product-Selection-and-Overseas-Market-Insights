@@ -47,6 +47,11 @@ services:
       BAILIAN_API_KEY: "${BAILIAN_API_KEY:-}"
       BAILIAN_BASE_URL: "${BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
       BAILIAN_MODEL: "${BAILIAN_MODEL:-qwen3.6-plus}"
+      BAILIAN_VISION_ENABLED: "${BAILIAN_VISION_ENABLED:-false}"
+      BAILIAN_VISION_MODEL: "${BAILIAN_VISION_MODEL:-}"
+      PRODUCT_UPLOAD_DIR: "${PRODUCT_UPLOAD_DIR:-/app/storage/product-intake}"
+      MAX_PRODUCT_IMAGE_SIZE_MB: "${MAX_PRODUCT_IMAGE_SIZE_MB:-10}"
+      ENABLE_DOMESTIC_URL_FETCH: "${ENABLE_DOMESTIC_URL_FETCH:-false}"
       ENABLE_YOUTUBE: "${ENABLE_YOUTUBE:-true}"
       ENABLE_ETSY: "${ENABLE_ETSY:-true}"
       ENABLE_UN_COMTRADE: "${ENABLE_UN_COMTRADE:-true}"
@@ -61,6 +66,8 @@ services:
       REDDIT_CLIENT_ID: "${REDDIT_CLIENT_ID:-}"
       REDDIT_CLIENT_SECRET: "${REDDIT_CLIENT_SECRET:-}"
       REDDIT_REDIRECT_URI: "${REDDIT_REDIRECT_URI:-https://opc.ankangyu.cn/auth/reddit/callback}"
+    volumes:
+      - product_uploads:/app/storage/product-intake
     ports:
       - "127.0.0.1:${BACKEND_BIND_PORT:-8000}:8000"
     depends_on:
@@ -108,3 +115,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  product_uploads:

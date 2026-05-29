@@ -148,6 +148,152 @@ def test_damaged_image_content_is_rejected_without_ai_call(
         assert db.scalar(select(func.count()).select_from(ProductImportJob)) == 0
 
 
+@pytest.mark.parametrize(
+    ("image_format", "mime_type", "expected_extension"),
+    [("JPEG", "image/jpeg", ".jpg"), ("WEBP", "image/webp", ".webp")],
+)
+def test_screenshot_upload_accepts_jpeg_and_webp(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    image_format: str,
+    mime_type: str,
+    expected_extension: str,
+) -> None:
+    client, _session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    fake = FakeVisionClient(_success_json())
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshot",
+        data={"company_id": str(company_id), "source_platform": "jd"},
+        files={"file": (f"product{expected_extension}", _image_bytes(image_format), mime_type)},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["asset"]["mime_type"] == mime_type
+    assert payload["asset"]["file_name"].endswith(expected_extension)
+    assert payload["draft"]["product_name_cn"] == "宠物凉感垫"
+    assert len(fake.calls) == 1
+
+
+def test_screenshot_upload_rejects_mime_content_mismatch_without_job(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    fake = FakeVisionClient(_success_json())
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshot",
+        data={"company_id": str(company_id)},
+        files={"file": ("mismatch.png", _image_bytes("JPEG"), "image/png")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "INVALID_IMAGE_CONTENT"
+    assert fake.calls == []
+    assert not (tmp_path / "uploads").exists()
+    with session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ProductImportJob)) == 0
+
+
+def test_empty_screenshot_file_is_rejected_without_job(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    fake = FakeVisionClient(_success_json())
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshot",
+        data={"company_id": str(company_id)},
+        files={"file": ("empty.png", b"", "image/png")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "INVALID_IMAGE_CONTENT"
+    assert fake.calls == []
+    with session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ProductImportJob)) == 0
+
+
+@pytest.mark.parametrize(
+    ("enabled", "model", "expected_code"),
+    [
+        ("false", "qwen-vl-test", "BAILIAN_VISION_DISABLED"),
+        ("true", "", "BAILIAN_VISION_MODEL_NOT_CONFIGURED"),
+    ],
+)
+def test_vision_disabled_or_missing_model_creates_manual_draft_without_ai_call(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    enabled: str,
+    model: str,
+    expected_code: str,
+) -> None:
+    client, _session_factory = client_with_session
+    monkeypatch.setenv("PRODUCT_UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("MAX_PRODUCT_IMAGE_SIZE_MB", "10")
+    monkeypatch.setenv("BAILIAN_VISION_ENABLED", enabled)
+    monkeypatch.setenv("BAILIAN_VISION_MODEL", model)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "fake-secret-key")
+    get_settings.cache_clear()
+    fake = FakeVisionClient(_success_json())
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshot",
+        data={"company_id": str(company_id)},
+        files={"file": ("product.png", _image_bytes("PNG"), "image/png")},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["job_status"] == "draft_ready_with_low_confidence"
+    assert payload["error_code"] == expected_code
+    assert payload["next_action"] == "manual_fill"
+    assert payload["draft"]["product_name_cn"] is None
+    assert fake.calls == []
+
+
+def test_screenshot_company_not_found_rejected_before_file_write(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    fake = FakeVisionClient(_success_json())
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+
+    response = client.post(
+        "/api/product-intake/screenshot",
+        data={"company_id": "99999"},
+        files={"file": ("product.png", _image_bytes("PNG"), "image/png")},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "COMPANY_NOT_FOUND"
+    assert fake.calls == []
+    assert not (tmp_path / "uploads").exists()
+    with session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ProductImportJob)) == 0
+
+
 def test_screenshot_upload_creates_job_asset_and_draft_with_safe_filename(
     client_with_session: tuple[TestClient, sessionmaker[Session]],
     monkeypatch: pytest.MonkeyPatch,
@@ -196,6 +342,53 @@ def test_screenshot_upload_creates_job_asset_and_draft_with_safe_filename(
         assert draft is not None and draft.product_name_cn == "宠物凉感垫"
         assert draft.price_cny is not None
         assert draft.cost_price_cny is None
+
+
+def test_screenshot_ai_sensitive_evidence_is_redacted_in_response_and_db(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    sensitive_payload = {
+        **_success_payload(),
+        "evidence": [
+            {
+                "field": "product_name_cn",
+                "source": "screenshot_text",
+                "value": "宠物凉感垫 联系 13812345678 user@example.com C:\\Users\\demo\\secret.png 123456789012",
+            }
+        ],
+    }
+    fake = FakeVisionClient(json.dumps(sensitive_payload, ensure_ascii=False))
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshot",
+        data={"company_id": str(company_id)},
+        files={"file": ("product.png", _image_bytes("PNG"), "image/png")},
+    )
+
+    assert response.status_code == 201
+    draft_response = client.get(f"/api/product-intake/drafts/{response.json()['draft_id']}")
+    assert draft_response.status_code == 200
+    response_text = response.text + draft_response.text
+    assert "13812345678" not in response_text
+    assert "user@example.com" not in response_text
+    assert "C:\\Users\\demo\\secret.png" not in response_text
+    assert "123456789012" not in response_text
+    assert "[REDACTED_PHONE]" in response_text
+    assert "[REDACTED_EMAIL]" in response_text
+    with session_factory() as db:
+        draft = db.get(ProductDraft, response.json()["draft_id"])
+        assert draft is not None
+        evidence_text = json.dumps(draft.evidence, ensure_ascii=False)
+        assert "13812345678" not in evidence_text
+        assert "user@example.com" not in evidence_text
+        assert "C:\\Users\\demo\\secret.png" not in evidence_text
+        assert "123456789012" not in evidence_text
 
 
 def test_ai_timeout_returns_low_confidence_manual_draft_without_secret_leak(

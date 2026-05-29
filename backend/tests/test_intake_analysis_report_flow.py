@@ -16,7 +16,7 @@ from app.core.config import get_settings
 from app.db import get_db
 from app.db.base import Base
 from app.main import app
-from app.models import Product, ProductDraft, ProductKeyword
+from app.models import Product, ProductDraft, ProductImportJob, ProductKeyword
 from app.services.agents import ExportInsightWorkflow
 from app.services.ai import BailianChatCompletion
 from app.services.data_sources import DataSourceService
@@ -191,6 +191,66 @@ def test_intake_confirm_analysis_dashboard_report_flow(
     assert ai_client.keyword_calls == 1
 
 
+def test_screenshot_intake_confirm_analysis_dashboard_report_flow(
+    client_with_session: tuple[TestClient, sessionmaker[Session], "Q15FlowAiClient"],
+) -> None:
+    client, session_factory, ai_client = client_with_session
+    company = client.post(
+        "/api/companies",
+        json={
+            "name": "Q16 Screenshot Demo Co",
+            "region": "Jiangsu",
+            "industry": "Pet supplies",
+            "description": "Screenshot-origin product intake analysis company.",
+            "target_countries": ["US"],
+        },
+    )
+    assert company.status_code == 201
+    company_id = int(company.json()["id"])
+    draft_id = _seed_screenshot_draft(session_factory, company_id)
+
+    confirm = client.post(f"/api/product-intake/drafts/{draft_id}/confirm", json={"company_id": company_id})
+    assert confirm.status_code == 200
+    product_id = int(confirm.json()["id"])
+    assert "该产品来自用户上传截图/链接，经 AI 提取后由用户确认。" in confirm.json()["description"]
+    assert "参考价格" in confirm.json()["description"]
+    assert "非采购成本" in confirm.json()["description"]
+    assert "来源链接" not in confirm.json()["description"]
+
+    start = client.post(
+        "/api/analysis/run",
+        json={"company_id": company_id, "product_ids": [product_id], "target_countries": ["US"], "competitor_limit": 8},
+    )
+    assert start.status_code == 202
+    analysis_id = int(start.json()["analysis_id"])
+
+    detail = client.get(f"/api/analysis/{analysis_id}")
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    profile = detail_payload["workflow_state"]["product_profiles"][0]
+    assert profile["keyword_source"] == "product_keywords"
+    assert profile["intake_source"]["source_type"] == "screenshot"
+    assert profile["intake_source"]["source_platform"] == "taobao"
+    assert profile["intake_source"]["source_url"] is None
+    assert profile["intake_source"]["domestic_price_role"] == "domestic_reference_only"
+    score = detail_payload["scores"][0]
+    assert score["evidence"]["intake_source"]["domestic_reference_price_cny"] == "39.90"
+
+    dashboard = client.get(f"/api/dashboard/{analysis_id}")
+    assert dashboard.status_code == 200
+    assert dashboard.json()["product_scores"]
+
+    report = client.post("/api/reports/generate", json={"analysis_id": analysis_id})
+    assert report.status_code == 200
+    markdown = report.json()["content_markdown"]
+    assert "该产品来自用户上传截图/链接，经 AI 提取后由用户确认。" in markdown
+    assert "国内商品截图/链接用于识别企业可供产品信息。" in markdown
+    assert "国内链接价格不代表海外销售价格" in markdown
+    assert "来源平台 taobao" in markdown
+    assert "脱敏来源链接" not in markdown
+    assert ai_client.keyword_calls == 0
+
+
 class Q15FlowAiClient:
     def __init__(self) -> None:
         self.keyword_calls = 0
@@ -284,6 +344,46 @@ def _failing_data_source_service(db: Session) -> DataSourceService:
         gdelt_provider=FailingGdeltProvider(),
         etsy_provider=FailingEtsyProvider(),
     )
+
+
+def _seed_screenshot_draft(session_factory: sessionmaker[Session], company_id: int) -> int:
+    with session_factory() as db:
+        job = ProductImportJob(
+            company_id=company_id,
+            source_type="screenshot",
+            source_platform="taobao",
+            status="draft_ready",
+        )
+        db.add(job)
+        db.flush()
+        draft = ProductDraft(
+            import_job_id=job.id,
+            company_id=company_id,
+            product_name_cn="截图宠物凉感垫",
+            product_name_en="Screenshot Pet Cooling Mat",
+            category="Pet supplies",
+            price_cny=Decimal("39.90"),
+            material="尼龙",
+            specification="来自用户上传截图的夏季宠物凉感垫",
+            selling_points={
+                "selling_points_cn": ["夏季降温"],
+                "selling_points_en": ["Cooling mat for summer"],
+                "usage_scenarios": ["home"],
+                "cross_border_keywords_en": ["pet cooling mat"],
+                "risk_notes": ["Screenshot fields require human review."],
+            },
+            target_users=["pet owners"],
+            source_platform="taobao",
+            evidence=[
+                {"field": "product_name_cn", "source": "screenshot_text", "value": "截图宠物凉感垫"},
+                {"field": "price_cny", "source": "screenshot_text", "value": "参考价 39.90"},
+            ],
+            confidence_score=Decimal("0.7200"),
+            status="draft",
+        )
+        db.add(draft)
+        db.commit()
+        return draft.id
 
 
 def _valid_report_markdown() -> str:

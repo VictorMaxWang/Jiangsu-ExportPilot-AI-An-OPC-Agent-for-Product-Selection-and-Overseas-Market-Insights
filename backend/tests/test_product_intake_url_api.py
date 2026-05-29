@@ -17,7 +17,7 @@ from app.db import get_db
 from app.db.base import Base
 from app.main import app
 from app.models import DomesticProductLink, ProductDraft, ProductImportJob
-from app.services.ai import BailianChatCompletion
+from app.services.ai import BailianChatCompletion, BailianTimeoutError
 from app.services.product_intake.domestic_page_fetcher import (
     DomesticPageFetchInput,
     DomesticPageFetchResult,
@@ -201,6 +201,118 @@ def test_url_intake_qwen_mock_success_creates_job_link_and_draft(
         assert draft.evidence and draft.evidence[0]["source"] == "url_text"
 
 
+@pytest.mark.parametrize(
+    ("url", "expected_platform", "expected_normalized"),
+    [
+        (
+            "https://item.taobao.com/item.htm?id=729576498123&spm=secret-token",
+            "taobao",
+            "https://item.taobao.com/item.htm?id=729576498123",
+        ),
+        (
+            "https://detail.tmall.com/item.htm?id=735808789012&skuId=188&spm=secret-token",
+            "tmall",
+            "https://detail.tmall.com/item.htm?id=735808789012&skuId=188",
+        ),
+        (
+            "https://mobile.pinduoduo.com/goods.html?goodsId=1234567890&access_token=secret-token",
+            "pinduoduo",
+            "https://mobile.yangkeduo.com/goods.html?goods_id=1234567890",
+        ),
+    ],
+)
+def test_url_intake_supported_platforms_normalize_and_create_link(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    expected_platform: str,
+    expected_normalized: str,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_url_env(monkeypatch)
+    fake_ai = FakeTextClient(json.dumps({**SUCCESS_PAYLOAD, "source_platform": expected_platform}, ensure_ascii=False))
+    fake_fetch = FakePageFetcher(_parsed_fetch_result())
+    app.dependency_overrides[get_bailian_client] = lambda: fake_ai
+    monkeypatch.setattr("app.services.product_intake.url_intake.fetch_domestic_product_page", fake_fetch)
+    company_id = _create_company(client)
+
+    response = client.post("/api/product-intake/url", json={"company_id": company_id, "url": url})
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "draft_ready"
+    assert payload["draft"]["source_platform"] == expected_platform
+    assert fake_fetch.calls == [expected_normalized]
+    assert "secret-token" not in response.text
+    with session_factory() as db:
+        link = db.scalar(select(DomesticProductLink).where(DomesticProductLink.import_job_id == payload["job_id"]))
+        draft = db.get(ProductDraft, payload["draft_id"])
+        assert link is not None
+        assert link.platform == expected_platform
+        assert link.normalized_url == expected_normalized
+        assert draft is not None and draft.source_url == expected_normalized
+
+
+def test_url_fetch_disabled_returns_needs_screenshot_without_fetch_or_ai(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, session_factory = client_with_session
+    monkeypatch.setenv("ENABLE_DOMESTIC_URL_FETCH", "false")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "fake-secret-key")
+    get_settings.cache_clear()
+    fake_ai = FakeTextClient(json.dumps(SUCCESS_PAYLOAD, ensure_ascii=False))
+    fake_fetch = FakePageFetcher(_parsed_fetch_result())
+    app.dependency_overrides[get_bailian_client] = lambda: fake_ai
+    monkeypatch.setattr("app.services.product_intake.url_intake.fetch_domestic_product_page", fake_fetch)
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/url",
+        json={"company_id": company_id, "url": "https://item.jd.com/100012043978.html"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "needs_screenshot"
+    assert payload["message"] == "请上传截图继续分析"
+    assert payload["draft"]["low_confidence"] is True
+    assert fake_fetch.calls == []
+    assert fake_ai.calls == []
+    with session_factory() as db:
+        job = db.get(ProductImportJob, payload["job_id"])
+        link = db.scalar(select(DomesticProductLink).where(DomesticProductLink.import_job_id == payload["job_id"]))
+        assert job is not None and job.status == "needs_screenshot"
+        assert job.error_code == "DOMESTIC_URL_FETCH_DISABLED"
+        assert link is not None and link.parse_status == "parsed"
+
+
+def test_url_missing_item_id_creates_needs_screenshot_draft(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_url_env(monkeypatch)
+    fake_ai = FakeTextClient(json.dumps(SUCCESS_PAYLOAD, ensure_ascii=False))
+    app.dependency_overrides[get_bailian_client] = lambda: fake_ai
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/url",
+        json={"company_id": company_id, "url": "https://item.taobao.com/item.htm?spm=abc"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "needs_screenshot"
+    assert fake_ai.calls == []
+    with session_factory() as db:
+        link = db.scalar(select(DomesticProductLink).where(DomesticProductLink.import_job_id == payload["job_id"]))
+        assert link is not None
+        assert link.platform == "taobao"
+        assert link.parse_status == "needs_screenshot"
+
+
 def test_url_intake_fetch_failure_falls_back_to_needs_screenshot(
     client_with_session: tuple[TestClient, sessionmaker[Session]],
     monkeypatch: pytest.MonkeyPatch,
@@ -237,6 +349,108 @@ def test_url_intake_fetch_failure_falls_back_to_needs_screenshot(
         assert draft.confidence_score == 0
 
 
+def test_url_empty_page_returns_needs_screenshot(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _session_factory = client_with_session
+    _configure_url_env(monkeypatch)
+    fake_ai = FakeTextClient(json.dumps(SUCCESS_PAYLOAD, ensure_ascii=False))
+    fake_fetch = FakePageFetcher(
+        DomesticPageFetchResult(parse_status="needs_screenshot", error_code="URL_PARSE_FAILED", message="请上传截图继续分析")
+    )
+    app.dependency_overrides[get_bailian_client] = lambda: fake_ai
+    monkeypatch.setattr("app.services.product_intake.url_intake.fetch_domestic_product_page", fake_fetch)
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/url",
+        json={"company_id": company_id, "url": "https://item.jd.com/100012043978.html"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "needs_screenshot"
+    assert fake_ai.calls == []
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_status", "expected_error"),
+    [
+        ("not json", "failed", "AI_RESPONSE_PARSE_ERROR"),
+        (json.dumps({"product_name_cn": "宠物凉感垫"}), "failed", "AI_RESPONSE_SCHEMA_ERROR"),
+        (
+            json.dumps({**SUCCESS_PAYLOAD, "product_name_cn": "", "confidence_score": 0.9}, ensure_ascii=False),
+            "needs_screenshot",
+            "AI_PRODUCT_NOT_IDENTIFIED",
+        ),
+        (
+            json.dumps({**SUCCESS_PAYLOAD, "confidence_score": 0.4}, ensure_ascii=False),
+            "needs_screenshot",
+            "LOW_CONFIDENCE",
+        ),
+    ],
+)
+def test_url_ai_parse_or_confidence_failures_return_safe_draft(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    content: str,
+    expected_status: str,
+    expected_error: str,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_url_env(monkeypatch)
+    fake_ai = FakeTextClient(content)
+    fake_fetch = FakePageFetcher(_parsed_fetch_result())
+    app.dependency_overrides[get_bailian_client] = lambda: fake_ai
+    monkeypatch.setattr("app.services.product_intake.url_intake.fetch_domestic_product_page", fake_fetch)
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/url",
+        json={"company_id": company_id, "url": "https://item.jd.com/100012043978.html?token=secret-token"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == expected_status
+    assert payload["message"] == "请上传截图继续分析"
+    assert "secret-token" not in response.text
+    with session_factory() as db:
+        job = db.get(ProductImportJob, payload["job_id"])
+        draft = db.get(ProductDraft, payload["draft_id"])
+        assert job is not None and job.error_code == expected_error
+        assert draft is not None and draft.status == "draft"
+
+
+def test_url_ai_error_returns_safe_failure_without_secret_leak(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_url_env(monkeypatch)
+    fake_ai = FakeTextClient(exc=BailianTimeoutError("Authorization: Bearer sentinel-secret"))
+    fake_fetch = FakePageFetcher(_parsed_fetch_result())
+    app.dependency_overrides[get_bailian_client] = lambda: fake_ai
+    monkeypatch.setattr("app.services.product_intake.url_intake.fetch_domestic_product_page", fake_fetch)
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/url",
+        json={"company_id": company_id, "url": "https://item.jd.com/100012043978.html"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert payload["message"] == "请上传截图继续分析"
+    assert "sentinel-secret" not in response.text
+    assert "Authorization" not in response.text
+    assert "Bearer" not in response.text
+    with session_factory() as db:
+        job = db.get(ProductImportJob, payload["job_id"])
+        assert job is not None and job.error_code == "BAILIAN_TIMEOUT"
+
+
 def test_url_intake_rejects_unsafe_url_before_db_write(
     client_with_session: tuple[TestClient, sessionmaker[Session]],
     monkeypatch: pytest.MonkeyPatch,
@@ -260,8 +474,9 @@ def test_url_intake_rejects_unsafe_url_before_db_write(
 
 
 class FakeTextClient:
-    def __init__(self, content: str) -> None:
-        self.content = content
+    def __init__(self, content: str | None = None, *, exc: Exception | None = None) -> None:
+        self.content = content or json.dumps(SUCCESS_PAYLOAD, ensure_ascii=False)
+        self.exc = exc
         self.calls: list[dict[str, object]] = []
 
     async def chat(
@@ -280,6 +495,8 @@ class FakeTextClient:
                 "json_mode": json_mode,
             }
         )
+        if self.exc is not None:
+            raise self.exc
         return BailianChatCompletion(content=self.content, model="qwen3.6-plus")
 
 

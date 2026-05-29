@@ -85,9 +85,12 @@ rsync -av --delete \
   --exclude 'node_modules' \
   --exclude '.next' \
   --exclude '.venv' \
+  --exclude 'storage' \
   --exclude '*.log' \
   ./ user@server:/opt/supinzhihang/
 ```
+
+`storage/` 是运行时目录，可能包含用户主动上传的商品截图，不要同步到 GitHub、聊天记录、截图材料或公开交付包。
 
 ## 4. 配置 `.env`
 
@@ -120,6 +123,12 @@ DATABASE_URL=postgresql+psycopg://supin_app:<same-postgres-password>@postgres:54
 REDIS_URL=redis://redis:6379/0
 FRONTEND_BIND_PORT=3000
 BACKEND_BIND_PORT=8000
+
+BAILIAN_VISION_ENABLED=false
+BAILIAN_VISION_MODEL=
+PRODUCT_UPLOAD_DIR=/app/storage/product-intake
+MAX_PRODUCT_IMAGE_SIZE_MB=10
+ENABLE_DOMESTIC_URL_FETCH=false
 ```
 
 注意：
@@ -127,6 +136,9 @@ BACKEND_BIND_PORT=8000
 - `POSTGRES_PASSWORD` 必须和 `DATABASE_URL` 中的密码一致。
 - `NEXT_PUBLIC_API_BASE_URL` 是前端公开变量，只能写本项目 API 地址，不能写任何第三方 API Key。
 - 生产环境不要设置 `ADMIN_AUTH_ENABLED=false`。
+- `PRODUCT_UPLOAD_DIR` 必须和 `docker-compose.prod.yml` 中的 `product_uploads` volume 挂载路径一致，默认使用 `/app/storage/product-intake`。
+- `MAX_PRODUCT_IMAGE_SIZE_MB` 控制单张商品截图大小，默认 10 MB；Nginx `client_max_body_size` 必须大于该值。
+- `ENABLE_DOMESTIC_URL_FETCH=false` 是生产安全默认值。关闭时单链接解析只做平台和 URL 安全识别，并提示用户上传截图继续分析。
 
 ## 5. 配置 API Key
 
@@ -137,6 +149,8 @@ DASHSCOPE_API_KEY=<optional-bailian-key>
 BAILIAN_API_KEY=
 BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 BAILIAN_MODEL=qwen3.6-plus
+BAILIAN_VISION_ENABLED=false
+BAILIAN_VISION_MODEL=<optional-vision-model>
 
 ENABLE_YOUTUBE=true
 YOUTUBE_DATA_API_KEY=<optional-youtube-key>
@@ -150,6 +164,16 @@ UN_COMTRADE_API_KEY=<optional-un-comtrade-key>
 ```
 
 未配置 YouTube、Etsy 或 UN Comtrade Key 时，系统应继续使用 CSV fallback 或公开接口兜底。不要在前端、Nginx、镜像构建参数或日志中传递这些 Key。
+
+智能商品截图识别只由后端调用 Bailian/Qwen。只有同时满足以下条件时才开启真实视觉识别：
+
+- `.env` 中配置了后端专用的 `DASHSCOPE_API_KEY` 或 `BAILIAN_API_KEY`。
+- `BAILIAN_VISION_ENABLED=true`。
+- `BAILIAN_VISION_MODEL` 指向可用的视觉/多模态模型。
+
+如果视觉模型未启用或不可用，系统会创建低置信度人工草稿，前端提示用户补全后再确认入库。
+
+国内商品链接解析只处理用户主动提交的单个链接，不使用 Cookie、登录态、验证码服务、代理池或模拟登录。登录、验证码、风控、超时、非 HTML、响应过大或结构不可解析时，系统返回 `needs_screenshot` 并提示上传商品截图，不应描述为绕过平台限制。
 
 ## 6. 启动 Docker Compose
 
@@ -169,6 +193,14 @@ bash scripts/deploy_prod.sh
 - 运行 `alembic upgrade head`。
 - 启动 backend 和 frontend。
 - 检查 `http://127.0.0.1:8000/health`。
+
+生产 compose 已为商品截图配置持久化 volume：
+
+```text
+product_uploads:/app/storage/product-intake
+```
+
+该 volume 用于保存用户主动上传的商品截图，容器重建后不会丢失。不要把 volume 内容提交 GitHub；如业务需要保留截图，应把该 volume 纳入服务器备份策略，并确保备份访问权限受控。
 
 手动命令：
 
@@ -200,7 +232,7 @@ docs/nginx/opc.ankangyu.cn.conf
 - `/` 转发到 `http://127.0.0.1:3000`
 - `/api` 和 `/api/` 转发到 `http://127.0.0.1:8000`
 - `/health` 转发到 `http://127.0.0.1:8000/health`
-- `client_max_body_size 20m` 支持 CSV 上传
+- `client_max_body_size 20m` 支持 CSV 上传和商品截图上传，并应大于 `.env` 中的 `MAX_PRODUCT_IMAGE_SIZE_MB`
 
 如果使用宝塔面板，可在站点反向代理中按上述路径配置，或把示例文件中的 location 合并到宝塔生成的站点配置。证书路径由宝塔或腾讯云 SSL 控制台管理，不要提交真实私钥。
 
@@ -263,6 +295,8 @@ BACKUP_DIR=/data/backups/supinzhihang bash scripts/backup_db.sh
 
 脚本使用 PostgreSQL custom dump 格式，并用 `pg_restore --list` 校验归档。备份文件权限为 `0600`。
 
+数据库备份不包含 `product_uploads` volume。若比赛或生产演示需要保留用户上传截图，应单独备份 Docker volume 或宿主机映射目录，并继续遵守“不公开、不提交、不截图泄露”的规则。
+
 ## 12. 回滚
 
 代码回滚：
@@ -309,6 +343,19 @@ RESTORE_CONFIRM=supinzhihang_prod bash scripts/restore_db.sh /var/backups/supinz
 ### YouTube/Etsy 显示 fallback
 
 对应 Key 缺失、额度不足、网络失败或平台审批限制时会使用 fallback。确认 `.env` 中 provider 开关与 Key 配置，必要时查看 backend 日志，但不要打印 Key。
+
+### 链接解析提示上传截图
+
+这是预期的合规兜底。`ENABLE_DOMESTIC_URL_FETCH=false`、页面需要登录、出现验证码/风控、访问超时、响应过大、非 HTML 或结构不可解析时，系统会返回 `needs_screenshot`。演示时切换到截图导入，不要尝试使用登录态、Cookie、验证码识别、代理池或模拟登录。
+
+### 截图上传失败或 413
+
+检查：
+
+- Nginx `client_max_body_size` 是否大于 `MAX_PRODUCT_IMAGE_SIZE_MB`。
+- `.env` 中 `MAX_PRODUCT_IMAGE_SIZE_MB` 是否设置过低。
+- 上传文件是否为 PNG、JPEG 或 WebP。
+- 后端 `PRODUCT_UPLOAD_DIR` 是否与 compose volume 挂载路径一致。
 
 ### 端口 5432 或 6379 无法访问
 

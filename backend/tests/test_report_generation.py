@@ -96,6 +96,10 @@ def test_report_generate_bad_json_uses_deterministic_fallback(
     assert "## 13. 下一步行动计划" in markdown
     assert "qwen3.6-plus 未返回可用" in markdown
     assert "数据源说明" in markdown
+    assert "该产品来自用户上传截图/链接，经 AI 提取后由用户确认。" in markdown
+    assert "国内商品截图/链接用于识别企业可供产品信息。" in markdown
+    assert "国内链接价格不代表海外销售价格" in markdown
+    assert "secret-token" not in markdown
 
 
 def test_report_generate_missing_key_uses_deterministic_fallback(
@@ -115,7 +119,13 @@ def test_report_generate_missing_key_uses_deterministic_fallback(
     assert "DASHSCOPE_API_KEY" not in response_text
     assert "Authorization" not in response_text
     assert "Bearer" not in response_text
-    assert "## 3. 数据源说明" in response.json()["content_markdown"]
+    payload = response.json()
+    assert "## 3. 数据源说明" in payload["content_markdown"]
+    assert "该产品来自用户上传截图/链接，经 AI 提取后由用户确认。" in payload["content_markdown"]
+    assert "国内商品截图/链接用于识别企业可供产品信息。" in payload["content_markdown"]
+    assert "国内链接价格不代表海外销售价格" in payload["content_markdown"]
+    assert "secret-token" not in payload["content_markdown"]
+    assert "国内链接价格不代表海外销售价格" in payload["content_html"]
 
 
 def test_report_generate_rejects_forbidden_ai_claims(

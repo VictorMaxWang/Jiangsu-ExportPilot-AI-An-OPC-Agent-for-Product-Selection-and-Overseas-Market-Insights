@@ -159,6 +159,40 @@ def test_terminal_drafts_cannot_be_edited(
     assert forbidden_field_response.status_code == 422
 
 
+def test_missing_job_draft_and_update_return_404(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, _session_factory = client_with_session
+
+    job_response = client.get("/api/product-intake/jobs/99999")
+    draft_response = client.get("/api/product-intake/drafts/99999")
+    update_response = client.put("/api/product-intake/drafts/99999", json={"product_name_cn": "不存在"})
+
+    assert job_response.status_code == 404
+    assert draft_response.status_code == 404
+    assert update_response.status_code == 404
+    assert update_response.json()["detail"]["code"] == "DRAFT_NOT_FOUND"
+
+
+def test_confirm_draft_requires_product_name_cn_and_rolls_back(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_with_session
+    company_id = _seed_company(session_factory)
+    draft_id = _seed_draft(session_factory, company_id, product_name_cn=None)
+
+    response = client.post(f"/api/product-intake/drafts/{draft_id}/confirm", json={"company_id": company_id})
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "DRAFT_CONFIRMATION_VALIDATION_FAILED"
+    with session_factory() as db:
+        draft = db.get(ProductDraft, draft_id)
+        assert draft is not None
+        assert draft.status == "draft"
+        assert draft.confirmed_product_id is None
+        assert db.scalar(select(func.count()).select_from(Product)) == 0
+
+
 def test_confirm_draft_creates_product_updates_job_and_persists_keywords(
     client_with_session: tuple[TestClient, sessionmaker[Session]],
 ) -> None:

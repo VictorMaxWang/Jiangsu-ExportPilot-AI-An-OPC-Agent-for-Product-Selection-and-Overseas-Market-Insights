@@ -15,7 +15,8 @@ COPY app ./app
 COPY alembic.ini .
 COPY alembic ./alembic
 
-RUN chown -R appuser:appuser /app
+RUN mkdir -p /app/storage/product-intake && \
+    chown -R appuser:appuser /app
 
 USER appuser
 
