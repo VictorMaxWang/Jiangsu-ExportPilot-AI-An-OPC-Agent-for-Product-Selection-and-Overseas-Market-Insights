@@ -1,0 +1,110 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-supinzhihang}"
+      POSTGRES_USER: "${POSTGRES_USER:-supin_app}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: "${APP_ENV:-production}"
+      BACKEND_URL: "${BACKEND_URL:-https://opc.ankangyu.cn}"
+      FRONTEND_URL: "${FRONTEND_URL:-https://opc.ankangyu.cn}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-https://opc.ankangyu.cn}"
+      PUBLIC_SITE_ORIGIN: "${PUBLIC_SITE_ORIGIN:-https://opc.ankangyu.cn}"
+      ALLOWED_ADMIN_ORIGINS: "${ALLOWED_ADMIN_ORIGINS:-}"
+      ADMIN_AUTH_ENABLED: "${ADMIN_AUTH_ENABLED:-true}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env for production}"
+      DATABASE_URL: "${DATABASE_URL:?Set DATABASE_URL in .env}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
+      BAILIAN_API_KEY: "${BAILIAN_API_KEY:-}"
+      BAILIAN_BASE_URL: "${BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
+      BAILIAN_MODEL: "${BAILIAN_MODEL:-qwen3.6-plus}"
+      ENABLE_YOUTUBE: "${ENABLE_YOUTUBE:-true}"
+      ENABLE_ETSY: "${ENABLE_ETSY:-true}"
+      ENABLE_UN_COMTRADE: "${ENABLE_UN_COMTRADE:-true}"
+      YOUTUBE_DATA_API_KEY: "${YOUTUBE_DATA_API_KEY:-}"
+      ETSY_KEYSTRING: "${ETSY_KEYSTRING:-}"
+      ETSY_SHARED_SECRET: "${ETSY_SHARED_SECRET:-}"
+      UN_COMTRADE_API_KEY: "${UN_COMTRADE_API_KEY:-}"
+      EBAY_CLIENT_ID: "${EBAY_CLIENT_ID:-}"
+      EBAY_CLIENT_SECRET: "${EBAY_CLIENT_SECRET:-}"
+      RAKUTEN_APPLICATION_ID: "${RAKUTEN_APPLICATION_ID:-}"
+      RAKUTEN_APP_ID: "${RAKUTEN_APP_ID:-}"
+      REDDIT_CLIENT_ID: "${REDDIT_CLIENT_ID:-}"
+      REDDIT_CLIENT_SECRET: "${REDDIT_CLIENT_SECRET:-}"
+      REDDIT_REDIRECT_URI: "${REDDIT_REDIRECT_URI:-https://opc.ankangyu.cn/auth/reddit/callback}"
+    ports:
+      - "127.0.0.1:${BACKEND_BIND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+      args:
+        NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-https://opc.ankangyu.cn}"
+    restart: unless-stopped
+    environment:
+      APP_ENV: "${APP_ENV:-production}"
+      NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-https://opc.ankangyu.cn}"
+    ports:
+      - "127.0.0.1:${FRONTEND_BIND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  postgres_data:
+  redis_data:

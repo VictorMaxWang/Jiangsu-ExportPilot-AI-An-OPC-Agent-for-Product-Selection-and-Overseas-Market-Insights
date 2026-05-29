@@ -143,11 +143,11 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> list[str]:
         origins = _split_origins(self.cors_origins)
         if self.is_production():
-            origins = [origin for origin in origins if origin != "*"]
-            origins.extend(["http://localhost:3000", "http://127.0.0.1:3000"])
+            origins = [origin for origin in origins if _is_production_origin(origin)]
             if self.public_site_origin:
                 origins.append(self.public_site_origin)
             origins.extend(_split_origins(self.allowed_admin_origins))
+            origins = [origin for origin in origins if _is_production_origin(origin)]
         return _dedupe_origins(origins)
 
     def is_production(self) -> bool:
@@ -171,6 +171,10 @@ def _dedupe_origins(origins: list[str]) -> list[str]:
             seen.add(origin)
             deduped.append(origin)
     return deduped
+
+
+def _is_production_origin(origin: str) -> bool:
+    return origin.startswith("https://") and origin != "*"
 
 
 @lru_cache

@@ -1,6 +1,17 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
 tests/
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*api_keys*
+*secret*
+secrets/

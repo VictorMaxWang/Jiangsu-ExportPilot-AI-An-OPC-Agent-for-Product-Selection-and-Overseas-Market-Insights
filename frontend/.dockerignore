@@ -1,0 +1,17 @@
+.env
+.env.*
+*api_keys*
+*secret*
+secrets/
+
+node_modules/
+.next/
+out/
+dist/
+coverage/
+
+*.log
+*.tsbuildinfo
+.eslintcache
+.DS_Store
+Thumbs.db

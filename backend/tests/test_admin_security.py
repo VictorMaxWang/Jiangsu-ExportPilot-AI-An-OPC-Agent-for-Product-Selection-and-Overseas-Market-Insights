@@ -187,11 +187,19 @@ def test_production_cors_filters_wildcard_and_allows_configured_origins(monkeypa
                 "Access-Control-Request-Method": "GET",
             },
         )
+        local_blocked = client.options(
+            "/health",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
 
     assert allowed.headers["access-control-allow-origin"] == "https://export.example.com"
     assert admin_allowed.headers["access-control-allow-origin"] == "https://opc.ankangyu.cn"
     assert blocked.headers.get("access-control-allow-origin") != "*"
     assert blocked.headers.get("access-control-allow-origin") is None
+    assert local_blocked.headers.get("access-control-allow-origin") is None
     get_settings.cache_clear()
 
 
