@@ -14,6 +14,7 @@ from app.models.market_data import (
     YoutubeSearchCache,
 )
 from app.models.product import Product, ProductKeyword
+from app.models.product_intake import DomesticProductLink, ProductDraft, ProductImportAsset, ProductImportJob
 from app.models.report import Report
 
 __all__ = [
@@ -24,10 +25,14 @@ __all__ = [
     "CompetitorItem",
     "ContentTrend",
     "DataSourceCache",
+    "DomesticProductLink",
     "MarketIndicator",
     "NewsItem",
     "OpportunityScore",
     "Product",
+    "ProductDraft",
+    "ProductImportAsset",
+    "ProductImportJob",
     "ProductKeyword",
     "Report",
     "TradeStat",

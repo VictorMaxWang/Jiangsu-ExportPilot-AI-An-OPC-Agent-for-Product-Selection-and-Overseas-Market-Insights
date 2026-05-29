@@ -21,6 +21,7 @@ node_modules/
 out/
 dist/
 coverage/
+storage/
 
 *.db
 *.sqlite

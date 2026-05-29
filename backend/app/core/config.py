@@ -52,6 +52,14 @@ class Settings(BaseSettings):
         default="qwen3.6-plus",
         validation_alias=AliasChoices("BAILIAN_MODEL", "SUPIN_BAILIAN_MODEL"),
     )
+    bailian_vision_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("BAILIAN_VISION_ENABLED", "SUPIN_BAILIAN_VISION_ENABLED"),
+    )
+    bailian_vision_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("BAILIAN_VISION_MODEL", "SUPIN_BAILIAN_VISION_MODEL"),
+    )
     bailian_timeout_seconds: float = Field(
         default=30.0,
         gt=0,
@@ -61,6 +69,19 @@ class Settings(BaseSettings):
         default=2,
         ge=0,
         validation_alias=AliasChoices("BAILIAN_MAX_RETRIES", "SUPIN_BAILIAN_MAX_RETRIES"),
+    )
+    product_upload_dir: str = Field(
+        default="storage/product-intake",
+        validation_alias=AliasChoices("PRODUCT_UPLOAD_DIR", "SUPIN_PRODUCT_UPLOAD_DIR"),
+    )
+    max_product_image_size_mb: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias=AliasChoices("MAX_PRODUCT_IMAGE_SIZE_MB", "SUPIN_MAX_PRODUCT_IMAGE_SIZE_MB"),
+    )
+    enable_domestic_url_fetch: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("ENABLE_DOMESTIC_URL_FETCH", "SUPIN_ENABLE_DOMESTIC_URL_FETCH"),
     )
     youtube_data_api_key: str | None = Field(
         default=None,
@@ -130,6 +151,7 @@ class Settings(BaseSettings):
         "admin_password",
         "public_site_origin",
         "admin_auth_enabled",
+        "bailian_vision_model",
         mode="before",
     )
     @classmethod

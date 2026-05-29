@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.session import SessionLocal
-from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductKeyword, Report
+from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductDraft, ProductKeyword, Report
 from app.schemas import (
     AnalysisDetailResponse,
     AnalysisRunRequest,
@@ -148,7 +149,7 @@ class ExportInsightWorkflow:
             company_id=request.company_id,
             status=WORKFLOW_STATUS_WAITING,
             current_step=WORKFLOW_STEPS[0].step_id,
-            input_products=[_product_snapshot(product) for product in products],
+            input_products=[_product_snapshot(product, self._db) for product in products],
             target_countries=request.target_countries,
             step_logs=_initial_step_logs(),
             workflow_state=now_state,
@@ -492,43 +493,61 @@ class ProductUnderstandingAgent(BaseWorkflowAgent):
 
         profiles: list[dict[str, Any]] = []
         ai_fallback_used = False
+        generated_keyword_count = 0
         for product in products:
-            keyword = _keyword_for_product(context.db, product)
+            stored_keywords = _stored_keywords_for_product(context.db, product)
+            keyword = stored_keywords[0] if stored_keywords else _optional_text(product.product_name_en)
             generated_keywords: list[str] = []
-            if not keyword:
+            keyword_source = "product_keywords" if stored_keywords else "product_name_en"
+            if not stored_keywords or not _optional_text(product.product_name_en):
                 try:
                     result = await generate_product_keywords(_product_keyword_request(product), context.ai_client)
                     generated_keywords = result.keywords_en[:5]
+                    if not _optional_text(product.product_name_en):
+                        product.product_name_en = result.product_name_en
+                    saved_keywords = _persist_generated_keywords(context.db, product, result.keywords_en)
+                    stored_keywords = _stored_keywords_for_product(context.db, product)
+                    generated_keyword_count += saved_keywords
                     keyword = generated_keywords[0] if generated_keywords else result.product_name_en
+                    keyword_source = "bailian_generated"
                 except (BailianError, AiStructuredOutputError):
                     ai_fallback_used = True
-                    keyword = _fallback_keyword(product)
+                    keyword = keyword or _fallback_keyword(product)
+                    keyword_source = "product_fields_fallback"
+            if not keyword:
+                keyword = _fallback_keyword(product)
+                keyword_source = "product_fields_fallback"
 
             profiles.append(
                 _jsonable(
                     {
-                        **_product_snapshot(product),
+                        **_product_snapshot(product, context.db),
                         "keyword": keyword,
+                        "keyword_source": keyword_source,
+                        "product_keywords": stored_keywords,
                         "generated_keywords": generated_keywords,
+                        "intake_source": _intake_source_for_product(context.db, product),
                         "hs_code": _infer_hs_code(" ".join([product.category or "", keyword, product.description or ""])),
                     }
                 )
             )
+        context.analysis_run.input_products = [_product_snapshot(product, context.db) for product in products]
 
         sources = [
             _source(
                 "bailian",
-                "AI fallback template" if ai_fallback_used else "Existing product fields",
-                "ai_fallback" if ai_fallback_used else "local",
+                "AI fallback template" if ai_fallback_used else ("qwen3.6-plus" if generated_keyword_count else "Existing product fields"),
+                "ai_fallback" if ai_fallback_used else (API_SOURCE if generated_keyword_count else "local"),
                 ai_fallback_used,
-                False,
-                "Product keyword understanding uses existing keywords first and deterministic fallback when AI is unavailable.",
+                bool(generated_keyword_count),
+                "Product keyword understanding uses existing keywords first, qwen3.6-plus when fields are missing, and deterministic fallback when AI is unavailable.",
             )
         ]
         return StepResult(
             output_summary={
                 "product_count": len(profiles),
                 "keyword_count": sum(1 for item in profiles if item.get("keyword")),
+                "generated_keyword_count": generated_keyword_count,
                 "ai_fallback_used": ai_fallback_used,
             },
             state_updates={"products": products, "product_profiles": profiles},
@@ -924,7 +943,7 @@ def _products_for_request(db: Session, request: AnalysisRunRequest) -> list[Prod
     )
 
 
-def _product_snapshot(product: Product) -> dict[str, Any]:
+def _product_snapshot(product: Product, db: Session | None = None) -> dict[str, Any]:
     return _jsonable(
         {
             "id": product.id,
@@ -938,6 +957,8 @@ def _product_snapshot(product: Product) -> dict[str, Any]:
             "certification": product.certification,
             "moq": product.moq,
             "description": product.description,
+            "product_keywords": _stored_keywords_for_product(db, product) if db is not None else [],
+            "intake_source": _intake_source_for_product(db, product) if db is not None else None,
         }
     )
 
@@ -957,28 +978,105 @@ def _product_keyword_request(product: Product) -> ProductKeywordsRequest:
     )
 
 
-def _keyword_for_product(db: Session, product: Product) -> str:
-    keyword = db.scalar(
-        select(ProductKeyword.keyword)
-        .where(ProductKeyword.product_id == product.id)
-        .order_by(ProductKeyword.id)
-        .limit(1)
-    )
-    return _optional_text(keyword) or _fallback_keyword(product)
-
-
 def _keywords_for_product(db: Session, product: Product) -> list[str]:
-    keywords = list(
+    keywords = _stored_keywords_for_product(db, product)
+    if keywords:
+        return keywords
+    return [_fallback_keyword(product)]
+
+
+def _stored_keywords_for_product(db: Session, product: Product, *, limit: int = 10) -> list[str]:
+    rows = list(
         db.scalars(
             select(ProductKeyword.keyword)
             .where(ProductKeyword.product_id == product.id)
             .order_by(ProductKeyword.id)
-            .limit(10)
+            .limit(limit)
         )
     )
-    if keywords:
-        return keywords
-    return [_fallback_keyword(product)]
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        keyword = _optional_text(row)
+        if not keyword:
+            continue
+        key = keyword.casefold()
+        if key in seen:
+            continue
+        cleaned.append(keyword)
+        seen.add(key)
+    return cleaned
+
+
+def _persist_generated_keywords(db: Session, product: Product, keywords: list[str]) -> int:
+    existing = {
+        (keyword or "").casefold()
+        for keyword in db.scalars(
+            select(ProductKeyword.keyword).where(ProductKeyword.product_id == product.id)
+        )
+    }
+    saved_count = 0
+    for value in keywords:
+        keyword = _optional_text(value)
+        if not keyword:
+            continue
+        key = keyword.casefold()
+        if key in existing:
+            continue
+        db.add(
+            ProductKeyword(
+                product_id=product.id,
+                keyword=keyword[:255],
+                language="en",
+                country=None,
+                source="bailian",
+            )
+        )
+        existing.add(key)
+        saved_count += 1
+    if saved_count or product in db.dirty:
+        db.flush()
+    return saved_count
+
+
+def _intake_source_for_product(db: Session, product: Product) -> dict[str, Any] | None:
+    draft = db.scalar(
+        select(ProductDraft)
+        .where(ProductDraft.confirmed_product_id == product.id)
+        .order_by(ProductDraft.updated_at.desc(), ProductDraft.id.desc())
+        .limit(1)
+    )
+    if draft is None:
+        return None
+    confidence_score = draft.confidence_score
+    return _jsonable(
+        {
+            "confirmed_draft_id": draft.id,
+            "import_job_id": draft.import_job_id,
+            "source_type": draft.import_job.source_type if draft.import_job is not None else None,
+            "source_platform": draft.source_platform,
+            "source_url": _safe_url(draft.source_url),
+            "evidence": draft.evidence or [],
+            "confidence_score": confidence_score,
+            "low_confidence": confidence_score is None or Decimal(str(confidence_score)) < Decimal("0.65"),
+            "confirmation_note": "该产品来自用户上传截图/链接，经 AI 提取后由用户确认。",
+            "domestic_reference_price_cny": draft.price_cny,
+            "domestic_price_role": "domestic_reference_only",
+            "pricing_boundary_note": (
+                "国内商品截图/链接价格仅用于判断产品信息完整度，不作为海外竞品价格、海外销售价格或采购成本。"
+            ),
+        }
+    )
+
+
+def _safe_url(value: str | None) -> str | None:
+    text = _optional_text(value)
+    if not text:
+        return None
+    parsed = urlsplit(text)
+    if not parsed.scheme or not parsed.netloc:
+        return text[:300]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))[:300]
 
 
 def _fallback_keyword(product: Product) -> str:

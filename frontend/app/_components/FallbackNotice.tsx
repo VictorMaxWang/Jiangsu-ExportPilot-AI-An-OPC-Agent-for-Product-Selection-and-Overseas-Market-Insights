@@ -1,4 +1,4 @@
-export type FallbackSource = "csv" | "sample" | "mock" | "public_api" | "cached";
+export type FallbackSource = "csv" | "sample" | "mock" | "public_api" | "cached" | "url" | "screenshot" | "ai";
 
 type FallbackNoticeProps = {
   source: FallbackSource;
@@ -12,6 +12,9 @@ const sourceLabels: Record<FallbackSource, string> = {
   mock: "Mock 输出",
   public_api: "公开 API",
   cached: "缓存结果",
+  url: "链接解析",
+  screenshot: "截图分析",
+  ai: "AI 识别",
 };
 
 export function FallbackNotice({ source, title, description }: FallbackNoticeProps) {

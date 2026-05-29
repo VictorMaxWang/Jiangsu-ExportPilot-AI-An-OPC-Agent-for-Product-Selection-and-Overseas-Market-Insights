@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../../_components/EmptyState";
 import { ErrorState } from "../../_components/ErrorState";
 import { FallbackNotice } from "../../_components/FallbackNotice";
@@ -58,7 +58,12 @@ const emptyProductForm: ProductFormState = {
   description: "",
 };
 
-export function ProductsWorkspace() {
+type ProductsWorkspaceProps = {
+  initialCompanyId?: number | null;
+  initialProductId?: number | null;
+};
+
+export function ProductsWorkspace({ initialCompanyId = null, initialProductId = null }: ProductsWorkspaceProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
@@ -82,25 +87,28 @@ export function ProductsWorkspace() {
     [products, selectedProductId],
   );
 
-  useEffect(() => {
-    void loadInitialData();
-  }, []);
-
-  async function loadInitialData() {
+  const loadInitialData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const companyResponse = await listCompanies();
       setCompanies(companyResponse.items);
       const firstCompanyId = companyResponse.items[0]?.id ?? null;
-      const productResponse = await listProducts(firstCompanyId ?? undefined);
+      const targetCompanyId =
+        initialCompanyId && companyResponse.items.some((company) => company.id === initialCompanyId)
+          ? initialCompanyId
+          : firstCompanyId;
+      const productResponse = await listProducts(targetCompanyId ?? undefined);
       setProducts(productResponse.items);
-      setSelectedCompanyId((current) => current ?? firstCompanyId);
+      setSelectedCompanyId((current) => current ?? targetCompanyId);
       setForm((current) => ({
         ...current,
-        company_id: current.company_id || (firstCompanyId ? String(firstCompanyId) : ""),
+        company_id: current.company_id || (targetCompanyId ? String(targetCompanyId) : ""),
       }));
       setSelectedProductId((current) => {
+        if (initialProductId && productResponse.items.some((product) => product.id === initialProductId)) {
+          return initialProductId;
+        }
         if (current && productResponse.items.some((product) => product.id === current)) {
           return current;
         }
@@ -111,7 +119,11 @@ export function ProductsWorkspace() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [initialCompanyId, initialProductId]);
+
+  useEffect(() => {
+    void loadInitialData();
+  }, [loadInitialData]);
 
   async function refreshProducts(companyId: number | null = selectedCompanyId) {
     setError(null);

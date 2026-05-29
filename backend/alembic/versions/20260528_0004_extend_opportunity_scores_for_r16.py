@@ -28,8 +28,9 @@ def upgrade() -> None:
     op.add_column("opportunity_scores", sa.Column("sources", sa.JSON(), nullable=True))
     op.add_column("opportunity_scores", sa.Column("evidence", sa.JSON(), nullable=True))
     op.add_column("opportunity_scores", sa.Column("competitor_analysis", sa.JSON(), nullable=True))
-    op.alter_column("opportunity_scores", "fallback_used", server_default=None)
-    op.alter_column("opportunity_scores", "ai_fallback_used", server_default=None)
+    if op.get_bind().dialect.name != "sqlite":
+        op.alter_column("opportunity_scores", "fallback_used", server_default=None)
+        op.alter_column("opportunity_scores", "ai_fallback_used", server_default=None)
 
 
 def downgrade() -> None:

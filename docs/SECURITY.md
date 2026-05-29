@@ -23,6 +23,11 @@ DASHSCOPE_API_KEY=
 BAILIAN_API_KEY=
 BAILIAN_BASE_URL=
 BAILIAN_MODEL=qwen3.6-plus
+BAILIAN_VISION_MODEL=
+BAILIAN_VISION_ENABLED=false
+PRODUCT_UPLOAD_DIR=storage/product-intake
+MAX_PRODUCT_IMAGE_SIZE_MB=10
+ENABLE_DOMESTIC_URL_FETCH=false
 YOUTUBE_DATA_API_KEY=
 ENABLE_YOUTUBE=true
 ENABLE_ETSY=true
@@ -79,10 +84,19 @@ secrets/
 ## 数据源凭据策略
 
 - Bailian：后端优先使用 `DASHSCOPE_API_KEY`，兼容 `BAILIAN_API_KEY`。
+- Bailian Vision：后端使用 `BAILIAN_VISION_MODEL` 和 `BAILIAN_VISION_ENABLED` 控制视觉/多模态商品理解；前端不得直接调用或持有相关凭据。
 - YouTube：后端使用 `YOUTUBE_DATA_API_KEY`。
 - Etsy：后端使用 `ETSY_KEYSTRING` 和 `ETSY_SHARED_SECRET` 组合为 `x-api-key`；`ENABLE_ETSY=false` 时禁用真实调用并使用 CSV fallback。
 - UN Comtrade：优先无 Key 调用；`ENABLE_UN_COMTRADE=false` 时直接使用 CSV fallback；仅在 401、403、429 或明确要求 subscription key 时尝试可选 `UN_COMTRADE_API_KEY`。
 - eBay、Rakuten、Reddit：当前为 P2 future providers，不作为 MVP 主流程依赖。
+
+## 智能商品导入安全边界
+
+- 截图和链接导入只处理用户主动提供的材料，不主动搜索、发现或批量抓取商品页面。
+- 国内商品链接解析仅限单次商品理解，只使用公开可访问页面内容；不得使用 Cookie、账号密码、验证码识别、代理池、模拟登录或任何绕过风控的方式。
+- 遇到登录墙、验证码、风控、访问受限、超时或结构不可解析时，后端必须失败并提示用户改用截图上传。
+- 上传截图应避免包含订单号、收货人、手机号、地址、聊天记录、账号头像等隐私信息；如识别到隐私线索，只能写入风险提示，不得写入正式产品字段。
+- 日志不得记录完整带查询参数 URL、截图原文 OCR、整页 HTML、Cookie、认证头或本地文件绝对路径；只记录脱敏域名、平台、状态、错误类型、耗时和 `job_id`。
 
 ## 日志脱敏规则
 

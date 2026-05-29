@@ -81,6 +81,153 @@ export type CsvImportResult = {
   errors: CsvImportErrorDetail[];
 };
 
+export type ProductIntakeSourcePlatform = "taobao" | "tmall" | "pinduoduo" | "jd" | "unknown";
+export type ProductIntakeEvidenceSource =
+  | "screenshot_text"
+  | "screenshot_visual"
+  | "url_text"
+  | "manual_text"
+  | "model_inference";
+export type ProductDraftStatus = "draft" | "confirmed" | "rejected";
+export type ProductIntakeJobStatus =
+  | "pending"
+  | "processing"
+  | "draft_ready"
+  | "draft_ready_with_low_confidence"
+  | "needs_screenshot"
+  | "failed"
+  | "confirmed";
+export type ProductUrlIntakeStatus = "draft_ready" | "needs_screenshot" | "failed";
+export type ProductScreenshotNextAction = "review_draft" | "manual_review" | "manual_fill";
+
+export type ProductDraftSellingPoints = {
+  selling_points_cn?: string[];
+  selling_points_en?: string[];
+  usage_scenarios?: string[];
+  cross_border_keywords_en?: string[];
+  risk_notes?: string[];
+};
+
+export type ProductIntakeEvidenceItem = {
+  field: string;
+  source: ProductIntakeEvidenceSource;
+  value: string | null;
+};
+
+export type ProductImportAsset = {
+  id: number;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+};
+
+export type DomesticProductLink = {
+  id: number;
+  platform: string;
+  normalized_url: string | null;
+  item_id: string | null;
+  sku_id: string | null;
+  parse_status: string;
+  parsed_title: string | null;
+  parse_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProductDraftSummary = {
+  id: number;
+  status: ProductDraftStatus;
+  product_name_cn: string | null;
+  product_name_en: string | null;
+  category: string | null;
+  price_cny: string | null;
+  confidence_score: string | null;
+  confirmed_product_id: number | null;
+  low_confidence: boolean;
+};
+
+export type ProductDraft = ProductDraftSummary & {
+  import_job_id: number;
+  company_id: number;
+  cost_price_cny: string | null;
+  weight_kg: string | null;
+  package_size: string | null;
+  material: string | null;
+  color_options: string[] | null;
+  specification: string | null;
+  selling_points: ProductDraftSellingPoints | null;
+  target_users: string[] | null;
+  source_platform: string | null;
+  evidence: ProductIntakeEvidenceItem[] | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProductDraftListResponse = {
+  items: ProductDraft[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type ProductDraftUpdateRequest = {
+  product_name_cn?: string | null;
+  product_name_en?: string | null;
+  category?: string | null;
+  price_cny?: string | null;
+  cost_price_cny?: string | null;
+  weight_kg?: string | null;
+  package_size?: string | null;
+  material?: string | null;
+  color_options?: string[] | null;
+  specification?: string | null;
+  selling_points?: ProductDraftSellingPoints | null;
+  target_users?: string[] | null;
+  risk_notes?: string[] | null;
+  confidence_score?: string | null;
+  evidence?: ProductIntakeEvidenceItem[] | null;
+};
+
+export type ProductImportJobDetailResponse = {
+  id: number;
+  company_id: number;
+  source_type: "screenshot" | "url" | "manual_text" | string;
+  source_platform: string;
+  status: ProductIntakeJobStatus | string;
+  error_code: string | null;
+  error_message: string | null;
+  model_used: string | null;
+  created_at: string;
+  updated_at: string;
+  assets: ProductImportAsset[];
+  domestic_links: DomesticProductLink[];
+  drafts: ProductDraftSummary[];
+};
+
+export type ProductScreenshotIntakeResponse = {
+  import_job_id: number;
+  draft_id: number;
+  job_status: ProductIntakeJobStatus | string;
+  draft_status: ProductDraftStatus | string;
+  low_confidence: boolean;
+  error_code: string | null;
+  error_message: string | null;
+  next_action: ProductScreenshotNextAction;
+  asset: ProductImportAsset;
+  draft: ProductDraftSummary;
+};
+
+export type ProductUrlIntakeResponse = {
+  job_id: number;
+  draft_id: number;
+  status: ProductUrlIntakeStatus;
+  message: string;
+  draft: ProductDraft;
+};
+
 export type ProductKeywordGenerationRequest = {
   target_country?: string | null;
   target_platforms?: string[];
@@ -294,6 +441,9 @@ export type AnalysisInputProduct = {
   certification: string | null;
   moq: number | null;
   description: string | null;
+  product_keywords?: string[];
+  keyword_source?: string | null;
+  intake_source?: Record<string, unknown> | null;
 };
 
 export type AnalysisScoreItem = {
@@ -496,6 +646,127 @@ export async function importProductUpload(
     method: "POST",
     body: formData,
     headers: {},
+  });
+}
+
+export async function uploadProductIntakeScreenshot(
+  payload: {
+    company_id: number;
+    file: File;
+    source_platform?: ProductIntakeSourcePlatform | null;
+  },
+  signal?: AbortSignal,
+): Promise<ProductScreenshotIntakeResponse> {
+  const formData = new FormData();
+  formData.set("company_id", String(payload.company_id));
+  formData.set("file", payload.file);
+  if (payload.source_platform) {
+    formData.set("source_platform", payload.source_platform);
+  }
+  return requestJson<ProductScreenshotIntakeResponse>("/api/product-intake/screenshot", {
+    method: "POST",
+    body: formData,
+    signal,
+  });
+}
+
+export async function importProductIntakeUrl(
+  payload: { company_id: number; url: string },
+  signal?: AbortSignal,
+): Promise<ProductUrlIntakeResponse> {
+  return requestJson<ProductUrlIntakeResponse>("/api/product-intake/url", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function getProductIntakeJob(
+  jobId: number,
+  signal?: AbortSignal,
+): Promise<ProductImportJobDetailResponse> {
+  return requestJson<ProductImportJobDetailResponse>(`/api/product-intake/jobs/${jobId}`, {
+    cache: "no-store",
+    signal,
+  });
+}
+
+export async function listProductIntakeDrafts(
+  query: {
+    company_id?: number;
+    status?: ProductDraftStatus;
+    source_platform?: ProductIntakeSourcePlatform;
+    limit?: number;
+    offset?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<ProductDraftListResponse> {
+  const params = new URLSearchParams();
+  if (query.company_id) {
+    params.set("company_id", String(query.company_id));
+  }
+  if (query.status) {
+    params.set("status", query.status);
+  }
+  if (query.source_platform) {
+    params.set("source_platform", query.source_platform);
+  }
+  if (query.limit) {
+    params.set("limit", String(query.limit));
+  }
+  if (query.offset !== undefined) {
+    params.set("offset", String(query.offset));
+  }
+  const queryString = params.toString();
+  return requestJson<ProductDraftListResponse>(`/api/product-intake/drafts${queryString ? `?${queryString}` : ""}`, {
+    cache: "no-store",
+    signal,
+  });
+}
+
+export async function getProductIntakeDraft(
+  draftId: number,
+  signal?: AbortSignal,
+): Promise<ProductDraft> {
+  return requestJson<ProductDraft>(`/api/product-intake/drafts/${draftId}`, {
+    cache: "no-store",
+    signal,
+  });
+}
+
+export async function updateProductIntakeDraft(
+  draftId: number,
+  payload: ProductDraftUpdateRequest,
+  signal?: AbortSignal,
+): Promise<ProductDraft> {
+  return requestJson<ProductDraft>(`/api/product-intake/drafts/${draftId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function confirmProductIntakeDraft(
+  draftId: number,
+  payload: { company_id: number },
+  signal?: AbortSignal,
+): Promise<Product> {
+  return requestJson<Product>(`/api/product-intake/drafts/${draftId}/confirm`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function rejectProductIntakeDraft(
+  draftId: number,
+  payload: { company_id: number; reason?: string | null },
+  signal?: AbortSignal,
+): Promise<ProductDraft> {
+  return requestJson<ProductDraft>(`/api/product-intake/drafts/${draftId}/reject`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
   });
 }
 

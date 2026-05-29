@@ -14,7 +14,7 @@ from app.api.ai import get_bailian_client
 from app.db import get_db
 from app.db.base import Base
 from app.main import app
-from app.models import AnalysisRun, Company, OpportunityScore, Product, Report
+from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductDraft, ProductImportJob, Report
 from app.services.ai import BailianChatCompletion, BailianConfigurationError
 from app.services.reports import REPORT_SECTION_TITLES, REPORT_TITLE
 
@@ -38,6 +38,14 @@ def test_report_generate_saves_markdown_html_and_routes(
     assert "<article" in payload["content_html"]
     assert "Authorization" not in response.text
     assert "Bearer" not in response.text
+    assert "该产品来自用户上传截图/链接，经 AI 提取后由用户确认。" in payload["content_markdown"]
+    assert "国内商品截图/链接用于识别企业可供产品信息。" in payload["content_markdown"]
+    assert "海外机会评分仍基于海外竞品样本、内容趋势、国家市场画像与贸易数据。" in payload["content_markdown"]
+    assert "国内链接价格不代表海外销售价格" in payload["content_markdown"]
+    assert "来源平台 jd" in payload["content_markdown"]
+    assert "https://item.jd.com/100012043978.html" in payload["content_markdown"]
+    assert "证据摘录" in payload["content_markdown"]
+    assert "secret-token" not in payload["content_markdown"]
     assert "销量预测" not in payload["content_markdown"]
     assert "GMV" not in payload["content_markdown"]
     assert stub.json_mode is True
@@ -229,6 +237,30 @@ def _seed_report_analysis(session_factory: sessionmaker[Session]) -> int:
         )
         db.add(product)
         db.flush()
+        job = ProductImportJob(
+            company_id=company.id,
+            source_type="url",
+            source_platform="jd",
+            source_url="https://item.jd.com/100012043978.html?token=secret-token",
+            status="confirmed",
+        )
+        db.add(job)
+        db.flush()
+        db.add(
+            ProductDraft(
+                import_job_id=job.id,
+                company_id=company.id,
+                product_name_cn=product.product_name_cn,
+                product_name_en=product.product_name_en,
+                category=product.category,
+                source_platform="jd",
+                source_url="https://item.jd.com/100012043978.html?token=secret-token",
+                evidence=[{"field": "product_name_cn", "source": "url_text", "value": "样本盖毯"}],
+                confidence_score=Decimal("0.6200"),
+                status="confirmed",
+                confirmed_product_id=product.id,
+            )
+        )
         analysis_run = AnalysisRun(
             company_id=company.id,
             status="fallback_used",

@@ -38,6 +38,10 @@ class Product(TimestampMixin, Base):
         "OpportunityScore",
         back_populates="product",
     )
+    confirmed_drafts: Mapped[list["ProductDraft"]] = relationship(
+        "ProductDraft",
+        back_populates="confirmed_product",
+    )
 
 
 class ProductKeyword(CreatedAtMixin, Base):

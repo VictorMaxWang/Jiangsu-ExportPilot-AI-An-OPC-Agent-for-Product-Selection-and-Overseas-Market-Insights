@@ -23,6 +23,14 @@ class BailianConfigurationError(BailianError):
     code = "BAILIAN_NOT_CONFIGURED"
 
 
+class BailianVisionDisabledError(BailianConfigurationError):
+    code = "BAILIAN_VISION_DISABLED"
+
+
+class BailianVisionModelNotConfiguredError(BailianConfigurationError):
+    code = "BAILIAN_VISION_MODEL_NOT_CONFIGURED"
+
+
 class BailianAuthenticationError(BailianError):
     code = "BAILIAN_AUTHENTICATION_ERROR"
 
@@ -68,12 +76,49 @@ class BailianClient:
         max_tokens: int = 1200,
         json_mode: bool = False,
     ) -> BailianChatCompletion:
+        return await self._chat_completion(
+            messages,
+            model=self._settings.bailian_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+        )
+
+    async def vision_chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 1800,
+        json_mode: bool = True,
+    ) -> BailianChatCompletion:
+        if not self._settings.bailian_vision_enabled:
+            raise BailianVisionDisabledError("Bailian vision analysis is disabled.")
+        if not self._settings.bailian_vision_model:
+            raise BailianVisionModelNotConfiguredError("Bailian vision model is not configured.")
+        return await self._chat_completion(
+            messages,
+            model=self._settings.bailian_vision_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+        )
+
+    async def _chat_completion(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool,
+    ) -> BailianChatCompletion:
         api_key = self._settings.bailian_api_key
         if not api_key:
             raise BailianConfigurationError("Bailian API key is not configured on backend.")
 
         payload: dict[str, Any] = {
-            "model": self._settings.bailian_model,
+            "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -98,7 +143,7 @@ class BailianClient:
         async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
             response = await self._post_with_retries(client, endpoint, headers, payload)
 
-        return self._parse_chat_completion(response)
+        return self._parse_chat_completion(response, fallback_model=model)
 
     async def _post_with_retries(
         self,
@@ -155,7 +200,7 @@ class BailianClient:
             status_code=status_code,
         )
 
-    def _parse_chat_completion(self, response: httpx.Response) -> BailianChatCompletion:
+    def _parse_chat_completion(self, response: httpx.Response, *, fallback_model: str) -> BailianChatCompletion:
         try:
             data = response.json()
         except ValueError as exc:
@@ -171,7 +216,7 @@ class BailianClient:
         if not isinstance(content, str):
             raise BailianResponseError("Bailian response content was not text.")
 
-        model = data.get("model") or self._settings.bailian_model
+        model = data.get("model") or fallback_model
         usage = data.get("usage")
         return BailianChatCompletion(
             content=content,

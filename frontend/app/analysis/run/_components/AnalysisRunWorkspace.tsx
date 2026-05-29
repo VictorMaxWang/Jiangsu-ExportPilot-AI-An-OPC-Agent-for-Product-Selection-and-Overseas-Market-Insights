@@ -14,9 +14,11 @@ import {
   AnalysisWorkflowStatus,
   Company,
   Product,
+  ProductDraft,
   generateReport,
   getAnalysisStatus,
   getFriendlyErrorMessage,
+  listProductIntakeDrafts,
   listCompanies,
   listProducts,
   startAnalysisRun,
@@ -42,12 +44,14 @@ export function AnalysisRunWorkspace() {
   const router = useRouter();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [recentIntakeDrafts, setRecentIntakeDrafts] = useState<ProductDraft[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
   const [countryInput, setCountryInput] = useState(DEMO_COUNTRY_INPUT);
   const [competitorLimit, setCompetitorLimit] = useState(DEFAULT_COMPETITOR_LIMIT);
   const [loading, setLoading] = useState(true);
   const [productsLoading, setProductsLoading] = useState(false);
+  const [intakeDraftsLoading, setIntakeDraftsLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatusResponse | null>(null);
@@ -95,6 +99,17 @@ export function AnalysisRunWorkspace() {
     [products, selectedProductIds],
   );
 
+  const selectedLowConfidenceImportDraft = useMemo(
+    () =>
+      recentIntakeDrafts.find(
+        (draft) =>
+          draft.low_confidence &&
+          draft.confirmed_product_id !== null &&
+          selectedProductIds.includes(draft.confirmed_product_id),
+      ) ?? null,
+    [recentIntakeDrafts, selectedProductIds],
+  );
+
   const terminal = analysisStatus ? isTerminalStatus(analysisStatus.status) : false;
   const fallbackUsed = analysisStatus?.status === "fallback_used" || Boolean(analysisStatus?.fallback_used_providers.length);
   const timelineSteps = analysisStatus?.step_logs.length ? analysisStatus.step_logs : buildInitialSteps();
@@ -126,6 +141,26 @@ export function AnalysisRunWorkspace() {
     }
   }, []);
 
+  const loadRecentIntakeDrafts = useCallback(async (companyId: number): Promise<ProductDraft[]> => {
+    setIntakeDraftsLoading(true);
+    try {
+      const draftResponse = await listProductIntakeDrafts({
+        company_id: companyId,
+        status: "confirmed",
+        limit: 5,
+        offset: 0,
+      });
+      const confirmedDrafts = draftResponse.items.filter((draft) => draft.confirmed_product_id !== null);
+      setRecentIntakeDrafts(confirmedDrafts);
+      return confirmedDrafts;
+    } catch {
+      setRecentIntakeDrafts([]);
+      return [];
+    } finally {
+      setIntakeDraftsLoading(false);
+    }
+  }, []);
+
   const loadInitialData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -137,17 +172,18 @@ export function AnalysisRunWorkspace() {
       setCountryInput(DEMO_COUNTRY_INPUT);
       setCompetitorLimit(DEFAULT_COMPETITOR_LIMIT);
       if (firstCompany) {
-        await loadProducts(firstCompany.id, true);
+        await Promise.all([loadProducts(firstCompany.id, true), loadRecentIntakeDrafts(firstCompany.id)]);
       } else {
         setProducts([]);
         setSelectedProductIds([]);
+        setRecentIntakeDrafts([]);
       }
     } catch (requestError) {
       setError(getFriendlyErrorMessage(requestError));
     } finally {
       setLoading(false);
     }
-  }, [loadProducts]);
+  }, [loadProducts, loadRecentIntakeDrafts]);
 
   useEffect(() => {
     void loadInitialData();
@@ -164,8 +200,10 @@ export function AnalysisRunWorkspace() {
     setCountryInput(DEMO_COUNTRY_INPUT);
     if (companyId) {
       void loadProducts(companyId, true);
+      void loadRecentIntakeDrafts(companyId);
     } else {
       setProducts([]);
+      setRecentIntakeDrafts([]);
     }
   }
 
@@ -179,7 +217,7 @@ export function AnalysisRunWorkspace() {
     setSelectedCompanyId(demoCompany.id);
     setCountryInput(DEMO_COUNTRY_INPUT);
     setCompetitorLimit(DEFAULT_COMPETITOR_LIMIT);
-    await loadProducts(demoCompany.id, true);
+    await Promise.all([loadProducts(demoCompany.id, true), loadRecentIntakeDrafts(demoCompany.id)]);
     setNotice("已应用推荐演示配置：首个企业、前 3 个产品、US/JP/GB 和 20 条竞品采集上限。");
   }
 
@@ -194,6 +232,17 @@ export function AnalysisRunWorkspace() {
       }
       return [...current, productId];
     });
+  }
+
+  function selectRecentIntakeProduct(draft: ProductDraft) {
+    if (draft.confirmed_product_id === null) {
+      return;
+    }
+    resetRunState();
+    setSelectedProductIds([draft.confirmed_product_id]);
+    if (draft.low_confidence) {
+      setNotice("该产品来自 AI 识别结果，建议确认字段后再分析。");
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -364,6 +413,55 @@ export function AnalysisRunWorkspace() {
                   ))}
                 </select>
               </label>
+
+              <div className="grid gap-2 rounded-lg border border-river/20 bg-river/5 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-ink">选择最近智能导入产品</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">可直接选择已确认入库的截图/链接导入产品进入分析流程。</p>
+                  </div>
+                  <Link
+                    className="rounded-md border border-river/30 bg-white px-3 py-2 text-sm font-semibold text-river"
+                    href={selectedCompanyId ? `/products/import?company_id=${selectedCompanyId}` : "/products/import"}
+                  >
+                    导入新商品
+                  </Link>
+                </div>
+                {intakeDraftsLoading ? (
+                  <LoadingState label="正在加载智能导入产品" rows={2} />
+                ) : recentIntakeDrafts.length === 0 ? (
+                  <p className="text-sm text-slate-500">当前企业暂无已确认的智能导入产品。</p>
+                ) : (
+                  <div className="grid gap-2">
+                    {recentIntakeDrafts.map((draft) => (
+                      <button
+                        key={draft.id}
+                        className={`rounded-md border px-3 py-2 text-left text-sm transition ${
+                          draft.confirmed_product_id !== null && selectedProductIds.includes(draft.confirmed_product_id)
+                            ? "border-river/40 bg-white text-ink shadow-sm"
+                            : "border-slate-200 bg-white/70 text-slate-700 hover:border-river/30 hover:bg-white"
+                        }`}
+                        disabled={draft.confirmed_product_id === null || productsLoading || submitting}
+                        type="button"
+                        onClick={() => selectRecentIntakeProduct(draft)}
+                      >
+                        <span className="block font-semibold text-ink">
+                          {draft.product_name_cn || draft.product_name_en || `草稿 #${draft.id}`}
+                        </span>
+                        <span className="mt-1 block text-xs text-slate-500">
+                          来源 {draft.source_platform || "unknown"} · 置信度 {draft.confidence_score ?? "未记录"}
+                          {draft.low_confidence ? " · 低置信度" : ""}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {selectedLowConfidenceImportDraft ? (
+                  <p className="rounded-lg border border-wheat/40 bg-wheat/10 p-3 text-sm font-medium leading-6 text-ink">
+                    该产品来自 AI 识别结果，建议确认字段后再分析。
+                  </p>
+                ) : null}
+              </div>
 
               <div className="grid gap-2">
                 <span className="text-sm font-medium text-slate-700">选择产品</span>

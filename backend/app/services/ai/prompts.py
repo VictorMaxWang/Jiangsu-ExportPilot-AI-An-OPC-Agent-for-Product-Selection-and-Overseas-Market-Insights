@@ -143,6 +143,80 @@ Rules:
 - Do not present the output as legal, tax, customs, certification, or investment advice.
 """
 
+SCREENSHOT_PRODUCT_UNDERSTANDING_PROMPT = """Analyze a user-uploaded product screenshot for product intake.
+Return only one valid JSON object. Do not wrap it in markdown.
+The JSON object must contain exactly these fields:
+{
+  "source_platform": "taobao|tmall|pinduoduo|jd|unknown",
+  "product_name_cn": "string or null",
+  "product_name_en": "string or null",
+  "category": "string or null",
+  "price_cny": 0.0,
+  "material": "string or null",
+  "specification": "string or null",
+  "dimensions": "string or null",
+  "weight_estimate": "string or null",
+  "color_options": ["string"],
+  "selling_points_cn": ["string"],
+  "selling_points_en": ["string"],
+  "target_users": ["string"],
+  "usage_scenarios": ["string"],
+  "cross_border_keywords_en": ["string"],
+  "risk_notes": ["string"],
+  "confidence_score": 0.0,
+  "evidence": [
+    {"field": "product_name_cn", "source": "screenshot_text", "value": "short visible excerpt"}
+  ]
+}
+Rules:
+- Use only visible screenshot information and clearly implied product identity.
+- Do not guess hidden fields. Use null or [] when uncertain.
+- Do not claim sales volume, reviews, rankings, transaction data, or platform verification as true.
+- Do not invent material, dimensions, weight, certifications, effects, guarantees, or compliance status.
+- price_cny is only a visible reference/list price, not a transaction price or procurement cost.
+- product_name_en, selling_points_en, and cross_border_keywords_en may be translated draft suggestions.
+- evidence[].source must be one of screenshot_text, screenshot_visual, url_text, manual_text, model_inference.
+- Keep evidence values short. Do not include private buyer identity, phone numbers, addresses, order numbers, account names, cookies, tokens, or full OCR text.
+- If privacy-like content appears, mention it only as a risk note without copying the private content.
+"""
+
+URL_PRODUCT_UNDERSTANDING_PROMPT = """Analyze public product page text from a user-submitted domestic ecommerce URL.
+Return only one valid JSON object. Do not wrap it in markdown.
+The JSON object must contain exactly these fields:
+{
+  "source_platform": "taobao|tmall|pinduoduo|jd|unknown",
+  "product_name_cn": "string or null",
+  "product_name_en": "string or null",
+  "category": "string or null",
+  "price_cny": 0.0,
+  "material": "string or null",
+  "specification": "string or null",
+  "dimensions": "string or null",
+  "weight_estimate": "string or null",
+  "color_options": ["string"],
+  "selling_points_cn": ["string"],
+  "selling_points_en": ["string"],
+  "target_users": ["string"],
+  "usage_scenarios": ["string"],
+  "cross_border_keywords_en": ["string"],
+  "risk_notes": ["string"],
+  "confidence_score": 0.0,
+  "evidence": [
+    {"field": "product_name_cn", "source": "url_text", "value": "short visible excerpt"}
+  ]
+}
+Rules:
+- Use only url_context and page_extract provided by the backend.
+- Do not use or infer from full HTML, cookies, authentication headers, browser login state, hidden scripts, or information not present in visible page text.
+- Do not claim sales volume, reviews, rankings, inventory, transaction price, platform verification, certifications, awards, or official validation as true.
+- price_cny is only a visible reference/list price when directly supported by URL text, not a transaction price or procurement cost.
+- product_name_en, selling_points_en, and cross_border_keywords_en may be translated draft suggestions.
+- evidence[].source must be url_text for visible URL text or model_inference for translation/summary only.
+- Keep evidence values short. Do not include private buyer identity, phone numbers, addresses, order numbers, account names, cookies, tokens, request headers, secrets, or full URL query strings.
+- If page evidence is weak or product identity is uncertain, use null or [] for unknown fields, set low confidence, and recommend screenshot upload in risk_notes.
+- If the page appears to be a login, captcha, risk-control, or blocked page, do not extract product fields; set confidence_score below 0.35 and recommend screenshot upload.
+"""
+
 
 def build_chat_messages(system_prompt: str, payload: dict[str, Any]) -> list[dict[str, str]]:
     return [
@@ -189,3 +263,29 @@ def build_report_section_messages(payload: dict[str, Any]) -> list[dict[str, str
 
 def build_report_generation_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
     return build_chat_messages(REPORT_FULL_GENERATION_PROMPT, payload)
+
+
+def build_screenshot_product_understanding_messages(
+    payload: dict[str, Any],
+    image_data_url: str,
+) -> list[dict[str, Any]]:
+    return [
+        {"role": "system", "content": f"{COMMON_SYSTEM_RULES}\n{SCREENSHOT_PRODUCT_UNDERSTANDING_PROMPT}"},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(payload, ensure_ascii=False, default=str),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_data_url},
+                },
+            ],
+        },
+    ]
+
+
+def build_url_product_understanding_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
+    return build_chat_messages(URL_PRODUCT_UNDERSTANDING_PROMPT, payload)

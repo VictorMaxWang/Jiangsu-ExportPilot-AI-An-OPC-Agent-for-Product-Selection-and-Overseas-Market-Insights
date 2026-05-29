@@ -21,6 +21,16 @@ class Company(TimestampMixin, Base):
         back_populates="company",
         cascade="all, delete-orphan",
     )
+    product_import_jobs: Mapped[list["ProductImportJob"]] = relationship(
+        "ProductImportJob",
+        back_populates="company",
+        cascade="all, delete-orphan",
+    )
+    product_drafts: Mapped[list["ProductDraft"]] = relationship(
+        "ProductDraft",
+        back_populates="company",
+        cascade="all, delete-orphan",
+    )
     analysis_runs: Mapped[list["AnalysisRun"]] = relationship(
         "AnalysisRun",
         back_populates="company",

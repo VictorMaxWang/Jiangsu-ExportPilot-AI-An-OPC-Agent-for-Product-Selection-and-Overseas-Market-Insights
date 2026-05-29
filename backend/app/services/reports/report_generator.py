@@ -6,12 +6,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.models import AnalysisRun, Company, OpportunityScore, Product, Report
+from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductDraft, Report
 from app.schemas import ReportCreate, ReportUpdate
 from app.services import report_service
 from app.services.ai import BailianClient, BailianError
@@ -35,6 +36,13 @@ REPORT_SECTION_TITLES = (
     "短视频与社媒内容建议",
     "风险提示",
     "下一步行动计划",
+)
+
+INTAKE_CONFIRMATION_NOTE = "该产品来自用户上传截图/链接，经 AI 提取后由用户确认。"
+INTAKE_SOURCE_BOUNDARY_LINES = (
+    "- 国内商品截图/链接用于识别企业可供产品信息。",
+    "- 海外机会评分仍基于海外竞品样本、内容趋势、国家市场画像与贸易数据。",
+    "- 国内链接价格不代表海外销售价格，不作为海外竞品价格、成交价、采购成本或利润依据。",
 )
 
 FORBIDDEN_REPORT_CLAIMS = (
@@ -172,7 +180,7 @@ class ReportGenerator:
                     "target_countries": company.target_countries or analysis_run.target_countries or [],
                 },
                 "products": [
-                    _product_payload(product, product_snapshots.get(product_id))
+                    _product_payload(product, product_snapshots.get(product_id), self._db)
                     for product_id, product in sorted(products.items())
                 ],
                 "product_profiles": _record_list(state.get("product_profiles")),
@@ -180,7 +188,7 @@ class ReportGenerator:
                 "content_trends": _record_list(state.get("content_trends")),
                 "marketing_assets": _record_list(state.get("marketing_assets")),
                 "scores": [
-                    _score_payload(row, products.get(row.product_id), product_snapshots.get(row.product_id))
+                    _score_payload(row, products.get(row.product_id), product_snapshots.get(row.product_id), self._db)
                     for row in score_rows
                 ],
                 "dashboard": dashboard_payload,
@@ -188,6 +196,7 @@ class ReportGenerator:
                 "policy": {
                     "data_boundary": "Use only structured fields in this payload.",
                     "sales_claim": "Platform samples are directional price/content signals and do not represent real sales.",
+                    "intake_source_boundary": list(INTAKE_SOURCE_BOUNDARY_LINES),
                     "prohibited_claims": list(FORBIDDEN_REPORT_CLAIMS),
                     "pdf_status": "PDF export is not implemented in v1.",
                 },
@@ -218,10 +227,11 @@ class ReportGenerator:
             if not isinstance(content_markdown, str) or not content_markdown.strip():
                 raise ValueError("AI response did not include content_markdown.")
             content_markdown = _normalize_ai_markdown(content_markdown)
+            content_markdown = _ensure_intake_source_markdown(content_markdown, report_input)
             _validate_report_markdown(content_markdown)
             return content_markdown, False
         except (BailianError, AiJsonParseError, ValueError, TypeError):
-            fallback = _fallback_notice(deterministic_markdown)
+            fallback = _ensure_intake_source_markdown(_fallback_notice(deterministic_markdown), report_input)
             _validate_report_markdown(fallback)
             return fallback, True
 
@@ -427,6 +437,10 @@ def _product_lines(report_input: dict[str, Any]) -> list[str]:
             )
             + " |"
         )
+    intake_lines = _intake_source_lines(products)
+    if intake_lines:
+        lines.append("")
+        lines.extend(intake_lines)
     product_profiles = _record_list(report_input.get("product_profiles"))
     if product_profiles:
         lines.append("")
@@ -445,6 +459,8 @@ def _source_lines(report_input: dict[str, Any]) -> list[str]:
         "- 本报告区分公开 API、缓存、样本数据与 CSV fallback；fallback 表示演示兜底或证据不完整，不表示流程失败。",
         "- eBay、Rakuten、Reddit 若未出现在本次来源记录中，不作为本报告真实调用来源。",
     ]
+    if _has_intake_source(report_input):
+        lines.extend(INTAKE_SOURCE_BOUNDARY_LINES)
     if not sources:
         lines.append("- 本次分析没有可展示的数据源记录。")
         return lines
@@ -698,6 +714,56 @@ def _next_action_lines(report_input: dict[str, Any]) -> list[str]:
     ]
 
 
+def _has_intake_source(report_input: dict[str, Any]) -> bool:
+    products = _record_list(report_input.get("products"))
+    return any(isinstance(product.get("intake_source"), dict) for product in products)
+
+
+def _intake_source_lines(products: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for product in products:
+        intake_source = product.get("intake_source")
+        if not isinstance(intake_source, dict):
+            continue
+        product_name = _display_product_name(product)
+        note = _safe_text(intake_source.get("confirmation_note")) or INTAKE_CONFIRMATION_NOTE
+        platform = _safe_text(intake_source.get("source_platform")) or "unknown"
+        confidence = _safe_text(intake_source.get("confidence_score")) or "未记录"
+        source_url = _safe_text(intake_source.get("source_url"))
+        domestic_price = _safe_text(intake_source.get("domestic_reference_price_cny"))
+        pricing_note = _safe_text(intake_source.get("pricing_boundary_note"))
+        lines.append(f"- {product_name}：{note} 来源平台 {platform}，AI 识别置信度 {confidence}。")
+        if source_url:
+            lines.append(f"  - 脱敏来源链接：{source_url}")
+        if domestic_price:
+            lines.append(f"  - 国内平台参考价：¥{domestic_price} CNY，仅用于产品信息完整度判断，不代表海外销售价格。")
+        if pricing_note:
+            lines.append(f"  - 价格边界：{pricing_note}")
+        evidence = _record_list(intake_source.get("evidence"))
+        if evidence:
+            evidence_text = []
+            for item in evidence[:3]:
+                field = _safe_text(item.get("field"))
+                source = _safe_text(item.get("source"))
+                value = _safe_text(item.get("value"))
+                if value:
+                    evidence_text.append(f"{field or 'field'} / {source or 'source'}: {value}")
+            if evidence_text:
+                lines.append(f"  - 证据摘录：{_join_values(evidence_text)}")
+    return lines
+
+
+def _ensure_intake_source_markdown(markdown: str, report_input: dict[str, Any]) -> str:
+    products = _record_list(report_input.get("products"))
+    if not _has_intake_source(report_input):
+        return markdown
+    required_lines = [*INTAKE_SOURCE_BOUNDARY_LINES, *_intake_source_lines(products)]
+    missing_lines = [line for line in required_lines if line not in markdown]
+    if not missing_lines:
+        return markdown
+    return markdown.rstrip() + "\n\n### 智能导入来源与数据边界\n" + "\n".join(missing_lines)
+
+
 def _fallback_notice(markdown: str) -> str:
     return (
         markdown
@@ -758,7 +824,7 @@ def _products_by_id(
     }
 
 
-def _product_payload(product: Product | None, snapshot: dict[str, Any] | None) -> dict[str, Any]:
+def _product_payload(product: Product | None, snapshot: dict[str, Any] | None, db: Session | None = None) -> dict[str, Any]:
     if product is not None:
         return _jsonable(
             {
@@ -773,6 +839,8 @@ def _product_payload(product: Product | None, snapshot: dict[str, Any] | None) -
                 "certification": product.certification,
                 "moq": product.moq,
                 "description": product.description,
+                "product_keywords": snapshot.get("product_keywords") if snapshot else [],
+                "intake_source": (snapshot.get("intake_source") if snapshot else None) or (_intake_source_for_product(db, product) if db is not None else None),
             }
         )
     return dict(snapshot or {})
@@ -782,8 +850,9 @@ def _score_payload(
     row: OpportunityScore,
     product: Product | None,
     snapshot: dict[str, Any] | None,
+    db: Session | None = None,
 ) -> dict[str, Any]:
-    product_data = _product_payload(product, snapshot)
+    product_data = _product_payload(product, snapshot, db)
     name = _display_product_name(product_data)
     return _jsonable(
         {
@@ -812,6 +881,46 @@ def _score_payload(
             "competitor_analysis": row.competitor_analysis or {},
         }
     )
+
+
+def _intake_source_for_product(db: Session, product: Product) -> dict[str, Any] | None:
+    draft = db.scalar(
+        select(ProductDraft)
+        .where(ProductDraft.confirmed_product_id == product.id)
+        .order_by(ProductDraft.updated_at.desc(), ProductDraft.id.desc())
+        .limit(1)
+    )
+    if draft is None:
+        return None
+    confidence_score = draft.confidence_score
+    return _jsonable(
+        {
+            "confirmed_draft_id": draft.id,
+            "import_job_id": draft.import_job_id,
+            "source_type": draft.import_job.source_type if draft.import_job is not None else None,
+            "source_platform": draft.source_platform,
+            "source_url": _safe_url(draft.source_url),
+            "evidence": draft.evidence or [],
+            "confidence_score": confidence_score,
+            "low_confidence": confidence_score is None or Decimal(str(confidence_score)) < Decimal("0.65"),
+            "confirmation_note": INTAKE_CONFIRMATION_NOTE,
+            "domestic_reference_price_cny": draft.price_cny,
+            "domestic_price_role": "domestic_reference_only",
+            "pricing_boundary_note": (
+                "国内商品截图/链接价格仅用于判断产品信息完整度，不作为海外竞品价格、海外销售价格或采购成本。"
+            ),
+        }
+    )
+
+
+def _safe_url(value: str | None) -> str | None:
+    text = _safe_text(value)
+    if not text:
+        return None
+    parsed = urlsplit(text)
+    if not parsed.scheme or not parsed.netloc:
+        return text[:300]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))[:300]
 
 
 def _collect_sources(

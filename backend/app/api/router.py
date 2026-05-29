@@ -11,6 +11,7 @@ from app.api.health import router as health_router
 from app.api.imports import router as imports_router
 from app.api.marketing import router as marketing_router
 from app.api.markets import router as markets_router
+from app.api.product_intake import router as product_intake_router
 from app.api.products import router as products_router
 from app.api.reports import router as reports_router
 from app.api.scoring import router as scoring_router
@@ -29,6 +30,7 @@ api_router.include_router(dashboard_router, prefix="/api/dashboard", tags=["dash
 api_router.include_router(imports_router, prefix="/api/import", tags=["import"])
 api_router.include_router(marketing_router, prefix="/api/marketing", tags=["marketing"])
 api_router.include_router(markets_router, prefix="/api/markets", tags=["markets"])
+api_router.include_router(product_intake_router, prefix="/api/product-intake", tags=["product-intake"])
 api_router.include_router(products_router, prefix="/api/products", tags=["products"])
 api_router.include_router(reports_router, prefix="/api/reports", tags=["reports"])
 api_router.include_router(scoring_router, prefix="/api/scoring", tags=["scoring"])

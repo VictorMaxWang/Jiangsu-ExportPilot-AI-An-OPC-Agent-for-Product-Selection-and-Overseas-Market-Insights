@@ -15,6 +15,7 @@ from app.services.ai import (
     BailianClient,
     BailianTimeoutError,
     BailianUpstreamError,
+    BailianVisionDisabledError,
 )
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 
@@ -70,6 +71,79 @@ def test_bailian_client_success_and_json_mode_request() -> None:
     assert result.content == "{\"ok\": true}"
     assert result.model == "qwen3.6-plus"
     assert result.usage == {"total_tokens": 12}
+    assert requests[0].url.path == "/compatible-mode/v1/chat/completions"
+
+
+def test_bailian_vision_chat_disabled_does_not_send_request() -> None:
+    called = False
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    client = BailianClient(
+        Settings(
+            bailian_api_key="vision-disabled-fake-key",
+            bailian_vision_enabled=False,
+            bailian_vision_model="qwen-vl-test",
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(BailianVisionDisabledError):
+        asyncio.run(client.vision_chat([{"role": "user", "content": "hello"}]))
+
+    assert called is False
+
+
+def test_bailian_vision_chat_uses_configured_model_and_image_payload() -> None:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        payload = json.loads(request.content.decode())
+        assert payload["model"] == "qwen-vl-from-env"
+        assert payload["response_format"] == {"type": "json_object"}
+        content = payload["messages"][1]["content"]
+        assert content[0]["type"] == "text"
+        assert content[1]["type"] == "image_url"
+        assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen-vl-from-env",
+                "choices": [{"message": {"content": "{\"ok\": true}"}}],
+                "usage": {"total_tokens": 20},
+            },
+        )
+
+    client = BailianClient(
+        Settings(
+            bailian_api_key="vision-fake-key",
+            bailian_base_url="https://example.test/compatible-mode/v1",
+            bailian_vision_enabled=True,
+            bailian_vision_model="qwen-vl-from-env",
+            bailian_max_retries=0,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    messages = [
+        {"role": "system", "content": "Return JSON."},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Analyze screenshot."},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+            ],
+        },
+    ]
+
+    result = asyncio.run(client.vision_chat(messages, json_mode=True))
+
+    assert result.content == "{\"ok\": true}"
+    assert result.model == "qwen-vl-from-env"
+    assert result.usage == {"total_tokens": 20}
     assert requests[0].url.path == "/compatible-mode/v1/chat/completions"
 
 

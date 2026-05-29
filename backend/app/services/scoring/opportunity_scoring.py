@@ -6,12 +6,13 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductKeyword
+from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductDraft, ProductKeyword
 from app.schemas import (
     AnalysisSource,
     CompetitorAnalysisResult,
@@ -98,7 +99,7 @@ class OpportunityScoringService:
         analysis_run = AnalysisRun(
             company_id=request.company_id,
             status="running",
-            input_products=[_product_input_snapshot(product) for product in products],
+            input_products=[_product_input_snapshot(product, self._db) for product in products],
             target_countries=request.target_countries,
             started_at=started_at,
         )
@@ -126,7 +127,7 @@ class OpportunityScoringService:
             raise ValueError("No products found for scoring")
 
         try:
-            analysis_run.input_products = [_product_input_snapshot(product) for product in products]
+            analysis_run.input_products = [_product_input_snapshot(product, self._db) for product in products]
             analysis_run.target_countries = request.target_countries
             if analysis_run.started_at is None:
                 analysis_run.started_at = _utc_now()
@@ -218,17 +219,15 @@ class OpportunityScoringService:
         return list(self._db.scalars(statement))
 
     def _keyword_for_product(self, product: Product) -> str:
-        keyword = self._db.scalar(
-            select(ProductKeyword.keyword)
-            .where(ProductKeyword.product_id == product.id)
-            .order_by(ProductKeyword.id)
-            .limit(1)
-        )
+        keyword = next(iter(self._keywords_for_product(product)), None)
         for candidate in (keyword, product.product_name_en, product.category, product.product_name_cn):
             normalized = _optional_text(candidate)
             if normalized:
                 return normalized
         return f"product {product.id}"
+
+    def _keywords_for_product(self, product: Product) -> list[str]:
+        return _stored_keywords_for_product(self._db, product)
 
     async def _score_product_country(
         self,
@@ -253,12 +252,13 @@ class OpportunityScoringService:
             country=normalized_country,
             competitor_items=competitors.items,
         )
+        intake_source = _intake_source_for_product(self._db, product)
         deterministic_risks: list[str] = []
         scores = {
             "trend_score": _score_trend(content),
             "price_score": _score_price(product, competitor_analysis, deterministic_risks),
             "market_score": _score_market(worldbank, trade),
-            "supply_score": _score_supply(product),
+            "supply_score": _score_supply(product, intake_source),
             "logistics_score": _score_logistics(product, normalized_country),
             "content_score": _score_content_fit(product, keyword, content),
         }
@@ -273,6 +273,8 @@ class OpportunityScoringService:
         )
         evidence = _evidence_payload(
             product=product,
+            product_keywords=self._keywords_for_product(product),
+            intake_source=intake_source,
             keyword=keyword,
             country=normalized_country,
             hs_code=hs_code,
@@ -352,7 +354,7 @@ class OpportunityScoringService:
             sources=sources,
         )
         payload = {
-            "product": _product_input_snapshot(product),
+            "product": _product_input_snapshot(product, self._db),
             "keyword": keyword,
             "country": country,
             "computed_scores": {key: str(value) for key, value in scores.items()} | {"total_score": str(total_score)},
@@ -460,7 +462,7 @@ def _score_market(worldbank: WorldBankCountryResponse, trade: UnComtradeTradeFlo
     return _score(0.25 * market_size + 0.30 * consumption + 0.20 * internet_score + 0.25 * float(trade_score))
 
 
-def _score_supply(product: Product) -> Decimal:
+def _score_supply(product: Product, intake_source: dict[str, Any] | None = None) -> Decimal:
     score = 55
     if product.cost_price_cny is not None and product.cost_price_cny > 0:
         score += 8 if product.cost_price_cny <= 120 else 3
@@ -477,6 +479,8 @@ def _score_supply(product: Product) -> Decimal:
             score -= 8
     if _optional_text(product.description):
         score += 5
+    if _has_domestic_reference_price(intake_source):
+        score += 3
     return _score(score)
 
 
@@ -586,6 +590,8 @@ def _sources_for_score(
 def _evidence_payload(
     *,
     product: Product,
+    product_keywords: list[str],
+    intake_source: dict[str, Any] | None,
     keyword: str,
     country: str,
     hs_code: str,
@@ -601,6 +607,8 @@ def _evidence_payload(
     return _jsonable(
         {
             "product": _product_input_snapshot(product),
+            "product_keywords": product_keywords,
+            "intake_source": intake_source,
             "keyword": keyword,
             "country": country,
             "hs_code": hs_code,
@@ -697,7 +705,7 @@ def _result_from_row(row: OpportunityScore, product: Product | None) -> Opportun
     )
 
 
-def _product_input_snapshot(product: Product) -> dict[str, Any]:
+def _product_input_snapshot(product: Product, db: Session | None = None) -> dict[str, Any]:
     return _jsonable(
         {
             "id": product.id,
@@ -711,8 +719,88 @@ def _product_input_snapshot(product: Product) -> dict[str, Any]:
             "certification": product.certification,
             "moq": product.moq,
             "description": product.description,
+            "product_keywords": _stored_keywords_for_product(db, product) if db is not None else [],
+            "intake_source": _intake_source_for_product(db, product) if db is not None else None,
         }
     )
+
+
+def _stored_keywords_for_product(db: Session, product: Product, *, limit: int = 10) -> list[str]:
+    rows = list(
+        db.scalars(
+            select(ProductKeyword.keyword)
+            .where(ProductKeyword.product_id == product.id)
+            .order_by(ProductKeyword.id)
+            .limit(limit)
+        )
+    )
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        keyword = _optional_text(row)
+        if not keyword:
+            continue
+        key = keyword.casefold()
+        if key in seen:
+            continue
+        cleaned.append(keyword)
+        seen.add(key)
+    return cleaned
+
+
+def _intake_source_for_product(db: Session, product: Product) -> dict[str, Any] | None:
+    draft = db.scalar(
+        select(ProductDraft)
+        .where(ProductDraft.confirmed_product_id == product.id)
+        .order_by(ProductDraft.updated_at.desc(), ProductDraft.id.desc())
+        .limit(1)
+    )
+    if draft is None:
+        return None
+    confidence_score = draft.confidence_score
+    return _jsonable(
+        {
+            "confirmed_draft_id": draft.id,
+            "import_job_id": draft.import_job_id,
+            "source_type": draft.import_job.source_type if draft.import_job is not None else None,
+            "source_platform": draft.source_platform,
+            "source_url": _safe_url(draft.source_url),
+            "evidence": draft.evidence or [],
+            "confidence_score": confidence_score,
+            "low_confidence": confidence_score is None or Decimal(str(confidence_score)) < Decimal("0.65"),
+            "confirmation_note": "该产品来自用户上传截图/链接，经 AI 提取后由用户确认。",
+            "domestic_reference_price_cny": draft.price_cny,
+            "domestic_price_role": "domestic_reference_only",
+            "pricing_boundary_note": (
+                "国内商品截图/链接价格仅用于判断产品信息完整度，不作为海外竞品价格、海外销售价格或采购成本。"
+            ),
+        }
+    )
+
+
+def _safe_url(value: str | None) -> str | None:
+    text = _optional_text(value)
+    if not text:
+        return None
+    parsed = urlsplit(text)
+    if not parsed.scheme or not parsed.netloc:
+        return text[:300]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))[:300]
+
+
+def _has_domestic_reference_price(intake_source: dict[str, Any] | None) -> bool:
+    if not isinstance(intake_source, dict):
+        return False
+    platform = _optional_text(intake_source.get("source_platform")) or ""
+    if platform.casefold() not in {"taobao", "tmall", "pinduoduo", "jd"}:
+        return False
+    value = intake_source.get("domestic_reference_price_cny")
+    if value in (None, ""):
+        return False
+    try:
+        return Decimal(str(value)) > 0
+    except Exception:
+        return False
 
 
 def _indicator_value(response: WorldBankCountryResponse, indicator_code: str) -> Decimal | None:

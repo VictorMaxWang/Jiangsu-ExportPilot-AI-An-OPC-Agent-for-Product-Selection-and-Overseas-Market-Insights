@@ -4,9 +4,9 @@
 
 苏品智航采用前后端分离架构：
 
-- Next.js 前端负责产品录入、看板展示、配置状态显示和报告预览。
-- FastAPI 后端负责业务 API、数据源接入、AI 调用、评分计算和报告生成。
-- PostgreSQL 保存产品、数据源结果、评分、AI 生成内容和报告记录。
+- Next.js 前端负责产品录入、智能导入、草稿确认、看板展示、配置状态显示和报告预览。
+- FastAPI 后端负责业务 API、Product Intake、数据源接入、AI 调用、评分计算和报告生成。
+- PostgreSQL 保存产品、产品导入任务与草稿、数据源结果、评分、AI 生成内容和报告记录。
 - 外部 API 与阿里云百炼只从后端访问。
 - CSV fallback 用于无 Key、网络异常或比赛现场演示兜底。
 
@@ -14,9 +14,10 @@
 User
   -> Next.js frontend
   -> FastAPI backend
+  -> Product Intake
   -> PostgreSQL
   -> External API clients
-  -> Alibaba Cloud Bailian qwen3.6-plus
+  -> Alibaba Cloud Bailian qwen3.6-plus / vision model
   -> CSV fallback data
 ```
 
@@ -36,7 +37,7 @@ frontend/
 
 前端职责：
 
-- 产品录入表单与 CSV 上传入口。
+- 产品录入表单、CSV 上传入口、智能商品导入页面和产品草稿确认入口。
 - 市场洞察看板，包括评分卡、趋势图、国家对比和平台信号。
 - 报告预览与导出入口。
 - 管理页展示后端返回的 API 配置状态。
@@ -65,16 +66,51 @@ backend/
 - 提供 REST API 给前端。
 - 读取环境变量和应用配置。
 - 管理数据库连接、迁移和模型。
+- 封装 Product Intake 流程，包括截图上传、单链接安全解析、Qwen 商品理解、草稿保存和确认入库。
 - 封装外部数据源客户端。
 - 封装阿里云百炼 `qwen3.6-plus` 调用。
 - 实现市场机会评分、营销文案生成和报告生成。
 - 提供 API Key 配置状态，但不返回明文。
+
+## Product Intake 模块
+
+Product Intake 用于把用户主动提供的商品截图、产品目录截图、单个国内商品链接或手动文本整理成可确认的产品草稿。
+
+```text
+frontend intake page
+  -> backend product intake API
+  -> Screenshot Intake / URL Intake / manual text
+  -> Qwen Product Understanding
+  -> product_drafts
+  -> Product Draft Review
+  -> Confirm to Product
+  -> existing analysis workflow
+```
+
+模块边界：
+
+- Screenshot Intake：接收用户上传的淘宝、拼多多、京东商品详情页截图或企业产品目录截图，校验 MIME、大小、尺寸和存储路径，只保存商品理解所需图片和元数据。
+- URL Intake：仅处理用户主动提交的单个商品 URL，识别平台并尝试读取公开可访问页面基础信息；遇到登录、验证码、风控、访问受限、超时或结构不可解析时失败，并提示用户上传截图。
+- Qwen Product Understanding：由后端集中调用 Qwen 视觉/多模态模型，按固定 JSON 契约提取商品字段、证据、风险和置信度；前端不得直接调用 Bailian 或持有 Key。
+- Product Draft Review：AI 提取结果先保存为 `product_drafts`，前端展示证据、置信度和风险提示，用户可编辑草稿字段。
+- Confirm to Product：只有用户确认后才创建正式 `products` 记录；被拒绝或低置信度失败的草稿不得进入分析流程。
+
+合规边界：
+
+- 不绕过登录、验证码、风控、签名校验、App 私有接口或平台访问限制。
+- 不做搜索结果、列表页、店铺页、分页或批量采集。
+- 不承诺能解析所有淘宝、拼多多、京东页面。
+- 截图和链接解析结果只能表述为用户提供材料和 AI/页面可见信息提取，不得表述为平台官方验证数据。
 
 ## 数据库设计方向
 
 核心实体建议：
 
 - `products`：企业产品与基础属性。
+- `product_import_jobs`：一次截图、链接或手动文本导入任务。
+- `product_import_assets`：导入任务关联的截图文件和元数据。
+- `product_drafts`：AI 或解析流程生成的待确认产品草稿。
+- `domestic_product_links`：用户主动提交的国内商品链接解析记录。
 - `market_requests`：一次市场分析请求。
 - `source_snapshots`：外部 API 或 CSV 的标准化数据快照。
 - `market_scores`：市场机会评分和维度分。
@@ -89,18 +125,18 @@ backend/
 
 ```text
 frontend request
-  -> backend analysis service
+  -> backend analysis / product intake service
   -> prompt builder
   -> Bailian client
   -> response parser
-  -> scoring/report service
+  -> scoring/report/product draft service
   -> database
   -> frontend response
 ```
 
 AI 输出必须记录：
 
-- 使用模型：`qwen3.6-plus`
+- 使用模型：`qwen3.6-plus` 或通过 `BAILIAN_VISION_MODEL` 配置的视觉/多模态模型。
 - 输入摘要，不记录敏感 Key。
 - 输出内容。
 - 生成时间。
