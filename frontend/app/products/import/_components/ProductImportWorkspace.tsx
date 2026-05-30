@@ -49,6 +49,8 @@ const SCREENSHOT_PLATFORM_OPTIONS: Array<{ label: string; value: ProductIntakeSo
   { label: "其他", value: "unknown" },
 ];
 
+const NEEDS_SCREENSHOT_MESSAGE = "该平台页面可能需要登录或动态渲染，请上传商品截图继续分析";
+
 export function ProductImportWorkspace({ initialCompanyId = null }: ProductImportWorkspaceProps) {
   const router = useRouter();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -149,24 +151,32 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
     setNeedsScreenshot(false);
     try {
       const response = await importProductIntakeUrl({ company_id: selectedCompanyId, url: productUrl.trim() });
-      const draft = await getProductIntakeDraft(response.draft_id);
-      setSelectedDraft(draft);
       setImportStatus(statusFromUrlResponse(response));
       if (response.status === "needs_screenshot") {
+        setSelectedDraft(null);
         setNeedsScreenshot(true);
-        setNotice(noticeFromAiResult(response.ai_result_type, "url", response.error_message));
+        setNotice(NEEDS_SCREENSHOT_MESSAGE);
         return;
       }
+      if (response.status === "failed") {
+        setSelectedDraft(null);
+        setError(controlledUrlError(response));
+        setNotice(null);
+        return;
+      }
+      const draft = await getProductIntakeDraft(response.draft_id);
+      setSelectedDraft(draft);
       setNotice(noticeFromAiResult(response.ai_result_type, "url", response.error_message));
     } catch (requestError) {
-      setError(getFriendlyErrorMessage(requestError));
+      setSelectedDraft(null);
+      setError(sanitizeTechnicalError(getFriendlyErrorMessage(requestError)));
     } finally {
       setSubmitting(null);
     }
   }
 
   function handleConfirmed(productId: number, companyId: number) {
-    router.push(`/products?company_id=${companyId}&product_id=${productId}`);
+    router.push(`/products?company_id=${companyId}&product_id=${productId}&intake=confirmed`);
   }
 
   if (loading) {
@@ -222,7 +232,7 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
                 type="button"
                 onClick={() => setActiveTab("url")}
               >
-                链接导入
+                商品链接导入
               </button>
             </div>
 
@@ -285,7 +295,7 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
                   <span className="text-sm font-medium text-slate-700">商品链接</span>
                   <input
                     className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
-                    placeholder="https://item.jd.com/..."
+                    placeholder="粘贴淘宝、拼多多或京东商品链接"
                     value={productUrl}
                     onChange={(event) => setProductUrl(event.target.value)}
                   />
@@ -302,8 +312,8 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
                   <div className="grid gap-3">
                     <FallbackNotice
                       source="url"
-                      title="该平台页面可能需要登录或动态渲染，请上传商品截图继续分析。"
-                      description="已保留当前草稿，上传截图后可用更完整的可见信息继续分析。"
+                      title={NEEDS_SCREENSHOT_MESSAGE}
+                      description="可切换到截图导入，用可见商品信息继续生成草稿。"
                     />
                     <button
                       className="w-fit rounded-md border border-river/30 bg-white px-4 py-2.5 text-sm font-semibold text-river"
@@ -327,10 +337,11 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
           </div>
         </Panel>
 
-        <Panel title="安全与边界">
+        <Panel title="合规说明">
           <ul className="grid gap-2 text-sm leading-6 text-slate-700">
             <li>仅分析用户主动提供的截图/链接。</li>
-            <li>链接解析失败时请上传截图。</li>
+            <li>不绕过登录、验证码、风控页面或平台访问限制。</li>
+            <li>链接解析失败时请上传商品截图继续分析。</li>
             <li>识别结果需人工确认后才会入库。</li>
             <li>系统不承诺获取平台真实销量。</li>
           </ul>
@@ -339,10 +350,15 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
 
       <section className="grid gap-5">
         <Panel title="识别状态">
+          <div className="mb-4 flex flex-wrap gap-2 text-xs font-semibold">
+            <span className="rounded-md bg-jade/10 px-2.5 py-1 text-jade">真实 Qwen 识别</span>
+            <span className="rounded-md bg-wheat/15 px-2.5 py-1 text-ink">AI 回退草稿</span>
+            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-600">需要人工处理</span>
+          </div>
           {importStatus ? (
             <div className="grid gap-3">
-              <DetailItem label="来源" value={importStatus.source === "screenshot" ? "截图导入" : "链接导入"} />
-              <DetailItem label="任务状态" value={importStatus.status} />
+              <DetailItem label="来源" value={importStatus.source === "screenshot" ? "截图导入" : "商品链接导入"} />
+              <DetailItem label="任务状态" value={jobStatusLabel(importStatus.status)} />
               <DetailItem label="AI 结果" value={aiResultLabel(importStatus.aiResultType)} />
               <DetailItem label="AI 回退" value={importStatus.aiFallbackUsed ? "是" : "否"} />
               <DetailItem label="模型" value={importStatus.modelUsed ?? "未调用"} />
@@ -471,6 +487,19 @@ function aiResultLabel(value: ProductIntakeAiResultType): string {
   return "需要人工处理";
 }
 
+function jobStatusLabel(value: string): string {
+  const labels: Record<string, string> = {
+    pending: "等待处理",
+    processing: "处理中",
+    draft_ready: "草稿已生成",
+    draft_ready_with_low_confidence: "低置信度草稿已生成",
+    needs_screenshot: "需要上传商品截图",
+    failed: "解析失败",
+    confirmed: "已确认入库",
+  };
+  return labels[value] ?? value;
+}
+
 function detailFromAiResult(value: ProductIntakeAiResultType, message: string | null, lowConfidence: boolean): string {
   if (value === "real_qwen") {
     return "已完成真实 Qwen 调用并生成待确认草稿。";
@@ -482,6 +511,20 @@ function detailFromAiResult(value: ProductIntakeAiResultType, message: string | 
     return message;
   }
   return lowConfidence ? "已生成低置信度草稿，需要人工复核或补全。" : "需要人工复核后再确认入库。";
+}
+
+function controlledUrlError(response: ProductUrlIntakeResponse): string {
+  return sanitizeTechnicalError(response.error_message || response.message || "链接解析失败，请检查链接后重试，或上传商品截图继续分析。");
+}
+
+function sanitizeTechnicalError(message: string): string {
+  if (!message.trim()) {
+    return "链接解析失败，请检查链接后重试，或上传商品截图继续分析。";
+  }
+  if (/traceback|stack|exception|at\s+\S+\(|\.(py|ts|tsx|js):\d+/i.test(message)) {
+    return "链接解析失败，请检查链接后重试，或上传商品截图继续分析。";
+  }
+  return message;
 }
 
 function noticeFromAiResult(value: ProductIntakeAiResultType, source: ImportTab, message: string | null): string {
@@ -506,13 +549,16 @@ function detectPlatformFromUrl(value: string): string {
     return "待识别";
   }
   const host = parsed.hostname.toLowerCase();
+  if (host === "e.tb.cn" || host.endsWith(".e.tb.cn") || host === "tb.cn" || host.endsWith(".tb.cn")) {
+    return "淘宝";
+  }
   if (host === "tmall.com" || host.endsWith(".tmall.com")) {
     return "天猫";
   }
   if (host === "taobao.com" || host.endsWith(".taobao.com")) {
     return "淘宝";
   }
-  if (host === "jd.com" || host.endsWith(".jd.com")) {
+  if (host === "jd.com" || host.endsWith(".jd.com") || host === "3.cn" || host.endsWith(".3.cn")) {
     return "京东";
   }
   if (host === "pinduoduo.com" || host.endsWith(".pinduoduo.com") || host === "yangkeduo.com" || host.endsWith(".yangkeduo.com")) {

@@ -273,7 +273,7 @@ export function ProductDraftEditor({
 
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="text-base font-semibold text-ink">证据</h3>
+            <h3 className="text-base font-semibold text-ink">证据 evidence</h3>
             <button
               className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
               disabled={!editable}
