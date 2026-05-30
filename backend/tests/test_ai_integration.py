@@ -303,6 +303,9 @@ def test_ai_smoke_text_success_and_failure_are_sanitized() -> None:
         "success": True,
         "fallback_used": False,
         "sanitized_error": None,
+        "error_stage": None,
+        "upstream_status_code": None,
+        "suggested_action": None,
     }
 
     auth_error = BailianAuthenticationError("auth failed")
@@ -315,6 +318,8 @@ def test_ai_smoke_text_success_and_failure_are_sanitized() -> None:
     assert payload["success"] is False
     assert payload["configured"] is True
     assert payload["sanitized_error"] == "BAILIAN_AUTHENTICATION_ERROR"
+    assert payload["error_stage"] == "upstream_http"
+    assert payload["suggested_action"]
     _assert_ai_response_safe(success_response.text + failure_response.text)
 
 
@@ -336,6 +341,8 @@ def test_ai_smoke_vision_success_disabled_and_missing_model_are_sanitized() -> N
     assert disabled_payload["success"] is False
     assert disabled_payload["configured"] is False
     assert disabled_payload["sanitized_error"] == "BAILIAN_VISION_DISABLED"
+    assert disabled_payload["error_stage"] == "request_build"
+    assert disabled_payload["suggested_action"]
 
     missing_model_error = BailianVisionModelNotConfiguredError("missing")
     with _override_ai_client(SmokeStubClient(vision_exc=missing_model_error)):
@@ -347,7 +354,57 @@ def test_ai_smoke_vision_success_disabled_and_missing_model_are_sanitized() -> N
     assert missing_payload["success"] is False
     assert missing_payload["configured"] is False
     assert missing_payload["sanitized_error"] == "BAILIAN_VISION_MODEL_NOT_CONFIGURED"
+    assert missing_payload["error_stage"] == "request_build"
+    assert missing_payload["suggested_action"]
     _assert_ai_response_safe(success_response.text + disabled_response.text + missing_model_response.text)
+
+
+def test_ai_smoke_vision_upstream_error_returns_safe_diagnostics() -> None:
+    upstream_error = BailianUpstreamError("raw upstream body should not be exposed", status_code=400)
+    with _override_ai_client(SmokeStubClient(vision_exc=upstream_error)):
+        with TestClient(app) as client:
+            response = client.post("/api/ai/smoke/vision")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "bailian"
+    assert payload["model"] == "qwen-vl-from-env"
+    assert payload["configured"] is True
+    assert payload["success"] is False
+    assert payload["fallback_used"] is False
+    assert payload["sanitized_error"] == "BAILIAN_UPSTREAM_ERROR"
+    assert payload["error_stage"] == "upstream_http"
+    assert payload["upstream_status_code"] == 400
+    assert "BAILIAN_VISION_MODEL" in payload["suggested_action"]
+    assert "raw upstream body" not in response.text
+    _assert_ai_response_safe(response.text)
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_error"),
+    [
+        ("", "EMPTY_PROVIDER_RESPONSE"),
+        ("not json", "AI_RESPONSE_PARSE_ERROR"),
+        ("{\"ok\": true}", "VISION_SMOKE_RESPONSE_INVALID"),
+    ],
+)
+def test_ai_smoke_vision_invalid_response_returns_response_parse_diagnostics(
+    content: str,
+    expected_error: str,
+) -> None:
+    with _override_ai_client(SmokeStubClient(vision_content=content)):
+        with TestClient(app) as client:
+            response = client.post("/api/ai/smoke/vision")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["configured"] is True
+    assert payload["sanitized_error"] == expected_error
+    assert payload["error_stage"] == "response_parse"
+    assert payload["upstream_status_code"] is None
+    assert payload["suggested_action"]
+    _assert_ai_response_safe(response.text)
 
 
 def test_ai_api_endpoints_return_structured_payloads() -> None:
@@ -479,9 +536,11 @@ class SmokeStubClient:
         *,
         chat_exc: Exception | None = None,
         vision_exc: Exception | None = None,
+        vision_content: str = "{\"ok\": true, \"image_seen\": true}",
     ) -> None:
         self.chat_exc = chat_exc
         self.vision_exc = vision_exc
+        self.vision_content = vision_content
 
     async def chat(self, *args, **kwargs) -> BailianChatCompletion:  # noqa: ANN002, ANN003
         if self.chat_exc is not None:
@@ -491,7 +550,7 @@ class SmokeStubClient:
     async def vision_chat(self, *args, **kwargs) -> BailianChatCompletion:  # noqa: ANN002, ANN003
         if self.vision_exc is not None:
             raise self.vision_exc
-        return BailianChatCompletion(content="{\"ok\": true}", model=self.vision_model_name)
+        return BailianChatCompletion(content=self.vision_content, model=self.vision_model_name)
 
 
 def _assert_ai_response_safe(text: str) -> None:

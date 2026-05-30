@@ -18,8 +18,10 @@ from app.db import get_db
 from app.db.base import Base
 from app.main import app
 from app.models import ProductDraft, ProductImportAsset, ProductImportJob
-from app.services.ai import BailianChatCompletion, BailianTimeoutError
+from app.services.ai import BailianChatCompletion, BailianTimeoutError, BailianUpstreamError
 
+
+VISION_PRODUCTION_FAILURE_MESSAGE = "视觉模型未通过生产验收，请先上传截图后人工补全或配置可用视觉模型。"
 
 SUCCESS_PAYLOAD: dict[str, object] = {
     "source_platform": "taobao",
@@ -419,6 +421,7 @@ def test_ai_timeout_returns_low_confidence_manual_draft_without_secret_leak(
     assert payload["job_status"] == "draft_ready_with_low_confidence"
     assert payload["low_confidence"] is True
     assert payload["error_code"] == "BAILIAN_TIMEOUT"
+    assert payload["error_message"] == VISION_PRODUCTION_FAILURE_MESSAGE
     assert payload["next_action"] == "manual_fill"
     assert payload["ai_result_type"] == "fallback"
     assert payload["ai_fallback_used"] is True
@@ -431,6 +434,34 @@ def test_ai_timeout_returns_low_confidence_manual_draft_without_secret_leak(
         assert draft is not None
         assert draft.product_name_cn is None
         assert draft.confidence_score == 0
+
+
+def test_ai_upstream_error_returns_production_vision_fallback_message(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, _session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    fake = FakeVisionClient(exc=BailianUpstreamError("raw upstream body should not leak", status_code=400))
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshot",
+        data={"company_id": str(company_id)},
+        files={"file": ("product.png", _image_bytes("PNG"), "image/png")},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["error_code"] == "BAILIAN_UPSTREAM_ERROR"
+    assert payload["error_message"] == VISION_PRODUCTION_FAILURE_MESSAGE
+    assert payload["low_confidence"] is True
+    assert payload["ai_result_type"] == "fallback"
+    assert payload["ai_fallback_used"] is True
+    assert payload["draft"]["product_name_cn"] is None
+    assert "raw upstream body" not in response.text
 
 
 @pytest.mark.parametrize(
@@ -473,6 +504,8 @@ def test_ai_invalid_or_unidentified_output_returns_manual_draft(
     assert response.status_code == 201
     payload = response.json()
     assert payload["error_code"] == expected_code
+    if expected_code in {"AI_RESPONSE_PARSE_ERROR", "AI_RESPONSE_SCHEMA_ERROR"}:
+        assert payload["error_message"] == VISION_PRODUCTION_FAILURE_MESSAGE
     assert payload["low_confidence"] is True
     assert payload["draft"]["product_name_cn"] is None
     if expected_code in {"AI_RESPONSE_PARSE_ERROR", "AI_RESPONSE_SCHEMA_ERROR"}:

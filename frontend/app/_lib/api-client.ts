@@ -100,6 +100,36 @@ export type ProductIntakeJobStatus =
   | "confirmed";
 export type ProductUrlIntakeStatus = "draft_ready" | "needs_screenshot" | "failed";
 export type ProductScreenshotNextAction = "review_draft" | "manual_review" | "manual_fill";
+export type AiErrorStage =
+  | "request_build"
+  | "upstream_http"
+  | "response_parse"
+  | "model_not_available"
+  | "unsupported_input"
+  | "unknown";
+
+export type AiSmokeResponse = {
+  provider: "bailian";
+  model: string | null;
+  configured: boolean;
+  success: boolean;
+  fallback_used: boolean;
+  sanitized_error: string | null;
+  error_stage: AiErrorStage | null;
+  upstream_status_code: number | null;
+  suggested_action: string | null;
+};
+
+export type AiStatusResponse = {
+  provider: "bailian";
+  model: string;
+  configured: boolean;
+  success: boolean;
+  fallback_used: boolean;
+  sanitized_error: string | null;
+  text: AiSmokeResponse;
+  vision: AiSmokeResponse;
+};
 
 export type ProductDraftSellingPoints = {
   selling_points_cn?: string[];

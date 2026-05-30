@@ -13,6 +13,7 @@ class BailianError(Exception):
     """Base error for sanitized Bailian client failures."""
 
     code = "BAILIAN_ERROR"
+    error_stage = "unknown"
 
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
@@ -21,6 +22,7 @@ class BailianError(Exception):
 
 class BailianConfigurationError(BailianError):
     code = "BAILIAN_NOT_CONFIGURED"
+    error_stage = "request_build"
 
 
 class BailianVisionDisabledError(BailianConfigurationError):
@@ -33,22 +35,27 @@ class BailianVisionModelNotConfiguredError(BailianConfigurationError):
 
 class BailianAuthenticationError(BailianError):
     code = "BAILIAN_AUTHENTICATION_ERROR"
+    error_stage = "upstream_http"
 
 
 class BailianRateLimitError(BailianError):
     code = "BAILIAN_RATE_LIMITED"
+    error_stage = "upstream_http"
 
 
 class BailianTimeoutError(BailianError):
     code = "BAILIAN_TIMEOUT"
+    error_stage = "upstream_http"
 
 
 class BailianUpstreamError(BailianError):
     code = "BAILIAN_UPSTREAM_ERROR"
+    error_stage = "upstream_http"
 
 
 class BailianResponseError(BailianError):
     code = "BAILIAN_RESPONSE_ERROR"
+    error_stage = "response_parse"
 
 
 @dataclass(frozen=True)
