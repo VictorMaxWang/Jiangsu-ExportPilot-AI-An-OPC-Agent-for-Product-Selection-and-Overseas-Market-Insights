@@ -102,3 +102,4 @@
 - 2026-05-30 11:18:50 +08:00 再次复查生产：`GET https://opc.ankangyu.cn/health` 为 HTTP 200；`GET https://opc.ankangyu.cn/api/ai/status` 仍为 HTTP 404，未触发生产 smoke。
 - 2026-05-30 11:23:31 +08:00 安全收敛后复跑：Bailian 真实调用凭据读取限定为 `DASHSCOPE_API_KEY`；`cd backend && py -3.11 -m pytest tests -q` 通过，270 passed；`cd frontend && npm run lint` 通过；`cd frontend && npm run build` 通过。
 - 2026-05-30 12:26:36 +08:00 GitHub 发布后复查：PR #2 已创建并推送；`GET https://opc.ankangyu.cn/health` 为 HTTP 200；`GET https://opc.ankangyu.cn/api/ai/status` 仍为 HTTP 404，生产 smoke 仍需部署后触发。
+- 2026-05-30 12:29:55 +08:00 继续复查：PR #2 仍为 open draft、mergeable，head 为 `655bb053f3fa7667cbab8063a5bc589a20c8b356`；`GET https://opc.ankangyu.cn/health` 为 HTTP 200；`GET https://opc.ankangyu.cn/api/ai/status` 仍为 HTTP 404，未触发生产 smoke。
