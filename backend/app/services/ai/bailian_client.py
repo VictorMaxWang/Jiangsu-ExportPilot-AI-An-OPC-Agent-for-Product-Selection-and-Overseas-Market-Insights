@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,9 +16,19 @@ class BailianError(Exception):
     code = "BAILIAN_ERROR"
     error_stage = "unknown"
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        upstream_code: str | None = None,
+        error_stage: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.upstream_code = upstream_code
+        if error_stage is not None:
+            self.error_stage = error_stage
 
 
 class BailianConfigurationError(BailianError):
@@ -200,19 +211,24 @@ class BailianClient:
         status_code = response.status_code
         if status_code < 400:
             return
+        upstream_code = _safe_upstream_error_code(response)
         if status_code in {401, 403}:
             raise BailianAuthenticationError(
                 "Bailian authentication failed.",
                 status_code=status_code,
+                upstream_code=upstream_code,
             )
         if status_code == 429:
             raise BailianRateLimitError(
                 "Bailian service rate limit reached.",
                 status_code=status_code,
+                upstream_code=upstream_code,
             )
         raise BailianUpstreamError(
             "Bailian service returned an upstream error.",
             status_code=status_code,
+            upstream_code=upstream_code,
+            error_stage=_diagnostic_stage_for_http_error(status_code, upstream_code),
         )
 
     def _parse_chat_completion(self, response: httpx.Response, *, fallback_model: str) -> BailianChatCompletion:
@@ -238,3 +254,47 @@ class BailianClient:
             model=str(model),
             usage=usage if isinstance(usage, dict) else None,
         )
+
+
+_SAFE_UPSTREAM_CODE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,96}$")
+
+
+def _safe_upstream_error_code(response: httpx.Response) -> str | None:
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    nested_error = data.get("error")
+    candidates: list[object] = [
+        data.get("code"),
+        data.get("type"),
+        data.get("status_name"),
+    ]
+    if isinstance(nested_error, dict):
+        candidates.extend(
+            [
+                nested_error.get("code"),
+                nested_error.get("type"),
+            ]
+        )
+
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            value = candidate.strip()
+            if _SAFE_UPSTREAM_CODE_RE.fullmatch(value):
+                return value
+    return None
+
+
+def _diagnostic_stage_for_http_error(status_code: int, upstream_code: str | None) -> str:
+    normalized = (upstream_code or "").casefold()
+    if status_code == 404 or "modelnotfound" in normalized or "model_not_found" in normalized:
+        return "model_not_available"
+    if "notcompatible" in normalized or "not_supported" in normalized or "unsupported" in normalized:
+        return "unsupported_input"
+    if status_code == 400:
+        return "unsupported_input"
+    return "upstream_http"

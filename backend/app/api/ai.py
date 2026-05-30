@@ -277,7 +277,7 @@ def _build_vision_smoke_messages() -> list[dict[str, object]]:
 
 def _small_png_base64() -> str:
     buffer = BytesIO()
-    image = Image.new("RGB", (4, 4), color=(40, 120, 200))
+    image = Image.new("RGB", (32, 32), color=(40, 120, 200))
     image.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
@@ -345,12 +345,45 @@ def _configuration_diagnostics(sanitized_error: str | None) -> tuple[AiErrorStag
 
 
 def _suggested_action_for_exception(exc: BailianError, *, vision: bool) -> str:
-    if exc.status_code in {400, 404} and vision:
-        return (
-            "Check that BAILIAN_VISION_MODEL is a valid Qwen-VL model ID available to this Bailian/DashScope "
-            "account and region; do not switch models silently."
-        )
+    if vision:
+        vision_action = _suggested_action_for_vision_exception(exc)
+        if vision_action is not None:
+            return vision_action
     return _suggested_action_for_code(exc.code, vision=vision)
+
+
+def _suggested_action_for_vision_exception(exc: BailianError) -> str | None:
+    upstream_code = str(getattr(exc, "upstream_code", "") or "")
+    normalized = upstream_code.casefold()
+    if exc.status_code == 404 or "modelnotfound" in normalized or "model_not_found" in normalized:
+        return (
+            "BAILIAN_VISION_MODEL appears unavailable or misspelled for this Bailian/DashScope account and "
+            "region; choose a valid vision model in the environment and restart the backend."
+        )
+    if exc.status_code == 401:
+        return "Check the backend DashScope credential without exposing it, then restart the backend and rerun vision smoke."
+    if exc.status_code == 403 or "accessdenied" in normalized or "forbidden" in normalized:
+        return (
+            "The DashScope account or workspace is not authorized for this vision model; enable Bailian vision "
+            "model access or grant model invocation permission in the console."
+        )
+    if "model_not_supported" in normalized or "notcompatible" in normalized:
+        return (
+            "OpenAI-compatible chat completions does not support this vision model/method combination; run the "
+            "backend probe and use DashScope native multimodal if that method succeeds."
+        )
+    if "unsupported" in normalized:
+        return (
+            "The configured vision model rejected this input shape or method; verify OpenAI-compatible image_url "
+            "support and try DashScope native multimodal if needed."
+        )
+    if exc.status_code == 400:
+        return (
+            "OpenAI-compatible request payload must use a supported image size and format; the vision smoke image "
+            "must be wider and taller than 10px. If 400 persists after the 32x32 smoke fix, check "
+            "BAILIAN_VISION_MODEL and try DashScope native multimodal."
+        )
+    return None
 
 
 def _suggested_action_for_code(code: str, *, vision: bool) -> str:
@@ -364,7 +397,10 @@ def _suggested_action_for_code(code: str, *, vision: bool) -> str:
         "BAILIAN_RESPONSE_ERROR": "Check whether the configured model returns OpenAI-compatible chat completion JSON.",
     }
     if code == "BAILIAN_UPSTREAM_ERROR" and vision:
-        return "Check BAILIAN_VISION_MODEL availability for the current account and region, then rerun vision smoke."
+        return (
+            "Check BAILIAN_VISION_MODEL availability for the current account and region, then run the safe "
+            "Bailian vision probe to compare OpenAI-compatible and DashScope native multimodal methods."
+        )
     if code == "BAILIAN_UPSTREAM_ERROR":
         return "Check Bailian service availability and the configured text model ID."
     return suggestions.get(code, "Review backend Bailian configuration and retry the smoke check.")

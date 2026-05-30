@@ -1,12 +1,15 @@
 import asyncio
+import base64
 import json
+from io import BytesIO
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from pydantic import ValidationError
 
-from app.api.ai import get_bailian_client
+from app.api.ai import _build_vision_smoke_messages, get_bailian_client
 from app.core.config import Settings, get_settings
 from app.main import app
 from app.schemas import ProductKeywordsResponse
@@ -147,6 +150,34 @@ def test_bailian_vision_chat_uses_configured_model_and_image_payload() -> None:
     assert result.model == "qwen-vl-from-env"
     assert result.usage == {"total_tokens": 20}
     assert requests[0].url.path == "/compatible-mode/v1/chat/completions"
+
+
+def test_vision_smoke_image_meets_bailian_minimum_size() -> None:
+    messages = _build_vision_smoke_messages()
+    content = messages[1]["content"]
+    assert isinstance(content, list)
+    image_url = content[1]["image_url"]["url"]
+    encoded = image_url.removeprefix("data:image/png;base64,")
+
+    with Image.open(BytesIO(base64.b64decode(encoded))) as image:
+        assert image.size == (32, 32)
+
+
+def test_bailian_client_preserves_safe_upstream_code_for_diagnostics() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": {"code": "model_not_found", "message": "not exposed"}})
+
+    client = BailianClient(
+        Settings(bailian_api_key="diagnostic-fake-key", bailian_max_retries=0),
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(BailianUpstreamError) as exc_info:
+        asyncio.run(client.chat([{"role": "user", "content": "hello"}]))
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.upstream_code == "model_not_found"
+    assert exc_info.value.error_stage == "model_not_available"
 
 
 def test_bailian_client_retries_transient_status() -> None:
@@ -377,6 +408,43 @@ def test_ai_smoke_vision_upstream_error_returns_safe_diagnostics() -> None:
     assert payload["upstream_status_code"] == 400
     assert "BAILIAN_VISION_MODEL" in payload["suggested_action"]
     assert "raw upstream body" not in response.text
+    _assert_ai_response_safe(response.text)
+
+
+def test_ai_smoke_vision_model_not_found_returns_specific_diagnostics() -> None:
+    upstream_error = BailianUpstreamError(
+        "safe upstream failure",
+        status_code=404,
+        upstream_code="model_not_found",
+        error_stage="model_not_available",
+    )
+    with _override_ai_client(SmokeStubClient(vision_exc=upstream_error)):
+        with TestClient(app) as client:
+            response = client.post("/api/ai/smoke/vision")
+
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error_stage"] == "model_not_available"
+    assert payload["upstream_status_code"] == 404
+    assert "unavailable or misspelled" in payload["suggested_action"]
+    _assert_ai_response_safe(response.text)
+
+
+def test_ai_smoke_vision_permission_error_returns_specific_diagnostics() -> None:
+    permission_error = BailianAuthenticationError(
+        "access denied",
+        status_code=403,
+        upstream_code="Model.AccessDenied",
+    )
+    with _override_ai_client(SmokeStubClient(vision_exc=permission_error)):
+        with TestClient(app) as client:
+            response = client.post("/api/ai/smoke/vision")
+
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error_stage"] == "upstream_http"
+    assert payload["upstream_status_code"] == 403
+    assert "not authorized" in payload["suggested_action"]
     _assert_ai_response_safe(response.text)
 
 
