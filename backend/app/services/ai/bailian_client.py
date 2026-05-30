@@ -68,6 +68,14 @@ class BailianClient:
         self._settings = settings or get_settings()
         self._transport = transport
 
+    @property
+    def model_name(self) -> str:
+        return self._settings.bailian_model
+
+    @property
+    def vision_model_name(self) -> str | None:
+        return self._settings.bailian_vision_model
+
     async def chat(
         self,
         messages: list[dict[str, str]],

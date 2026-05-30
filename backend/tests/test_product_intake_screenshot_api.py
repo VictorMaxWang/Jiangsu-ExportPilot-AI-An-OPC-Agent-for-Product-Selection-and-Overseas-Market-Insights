@@ -266,6 +266,9 @@ def test_vision_disabled_or_missing_model_creates_manual_draft_without_ai_call(
     assert payload["job_status"] == "draft_ready_with_low_confidence"
     assert payload["error_code"] == expected_code
     assert payload["next_action"] == "manual_fill"
+    assert payload["ai_result_type"] == "fallback"
+    assert payload["ai_fallback_used"] is True
+    assert payload["model_used"] is None
     assert payload["draft"]["product_name_cn"] is None
     assert fake.calls == []
 
@@ -316,6 +319,9 @@ def test_screenshot_upload_creates_job_asset_and_draft_with_safe_filename(
     assert payload["job_status"] == "draft_ready"
     assert payload["low_confidence"] is False
     assert payload["error_code"] is None
+    assert payload["ai_result_type"] == "real_qwen"
+    assert payload["ai_fallback_used"] is False
+    assert payload["model_used"] == "qwen-vl-test"
     assert payload["asset"]["mime_type"] == "image/png"
     assert payload["draft"]["product_name_cn"] == "宠物凉感垫"
     assert fake.calls and fake.calls[0]["json_mode"] is True
@@ -414,6 +420,8 @@ def test_ai_timeout_returns_low_confidence_manual_draft_without_secret_leak(
     assert payload["low_confidence"] is True
     assert payload["error_code"] == "BAILIAN_TIMEOUT"
     assert payload["next_action"] == "manual_fill"
+    assert payload["ai_result_type"] == "fallback"
+    assert payload["ai_fallback_used"] is True
     assert payload["draft"]["product_name_cn"] is None
     assert "sentinel-secret" not in response.text
     assert "Authorization" not in response.text
@@ -467,6 +475,12 @@ def test_ai_invalid_or_unidentified_output_returns_manual_draft(
     assert payload["error_code"] == expected_code
     assert payload["low_confidence"] is True
     assert payload["draft"]["product_name_cn"] is None
+    if expected_code in {"AI_RESPONSE_PARSE_ERROR", "AI_RESPONSE_SCHEMA_ERROR"}:
+        assert payload["ai_result_type"] == "fallback"
+        assert payload["ai_fallback_used"] is True
+    else:
+        assert payload["ai_result_type"] == "manual_required"
+        assert payload["ai_fallback_used"] is False
 
 
 def test_low_confidence_ai_output_creates_reviewable_draft(
@@ -492,6 +506,9 @@ def test_low_confidence_ai_output_creates_reviewable_draft(
     assert payload["error_code"] == "LOW_CONFIDENCE"
     assert payload["low_confidence"] is True
     assert payload["next_action"] == "manual_review"
+    assert payload["ai_result_type"] == "manual_required"
+    assert payload["ai_fallback_used"] is False
+    assert payload["model_used"] == "qwen-vl-test"
     assert payload["draft"]["product_name_cn"] == "宠物凉感垫"
 
 

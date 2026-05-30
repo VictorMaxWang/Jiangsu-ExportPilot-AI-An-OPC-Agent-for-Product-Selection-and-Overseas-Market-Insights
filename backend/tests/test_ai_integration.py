@@ -11,16 +11,18 @@ from app.core.config import Settings, get_settings
 from app.main import app
 from app.schemas import ProductKeywordsResponse
 from app.services.ai import (
+    BailianAuthenticationError,
     BailianChatCompletion,
     BailianClient,
     BailianTimeoutError,
     BailianUpstreamError,
     BailianVisionDisabledError,
+    BailianVisionModelNotConfiguredError,
 )
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 
 
-def test_bailian_settings_defaults_and_key_priority(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bailian_settings_defaults_and_dashscope_only_key(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_bailian_env(monkeypatch)
     get_settings.cache_clear()
     defaults = get_settings()
@@ -35,7 +37,7 @@ def test_bailian_settings_defaults_and_key_priority(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.delenv("DASHSCOPE_API_KEY")
     get_settings.cache_clear()
-    assert get_settings().bailian_api_key == "bailian-fake-key"
+    assert get_settings().bailian_api_key is None
     get_settings.cache_clear()
 
 
@@ -243,6 +245,111 @@ def test_ai_api_missing_key_returns_503(monkeypatch: pytest.MonkeyPatch) -> None
     get_settings.cache_clear()
 
 
+def test_ai_status_reports_text_and_vision_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_bailian_env(monkeypatch)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "configured-placeholder")
+    monkeypatch.setenv("BAILIAN_MODEL", "qwen3.6-plus")
+    monkeypatch.setenv("BAILIAN_VISION_ENABLED", "true")
+    monkeypatch.setenv("BAILIAN_VISION_MODEL", "qwen-vl-from-env")
+    get_settings.cache_clear()
+
+    with TestClient(app) as client:
+        response = client.get("/api/ai/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "bailian"
+    assert payload["model"] == "qwen3.6-plus"
+    assert payload["configured"] is True
+    assert payload["success"] is False
+    assert payload["fallback_used"] is False
+    assert payload["text"]["configured"] is True
+    assert payload["text"]["model"] == "qwen3.6-plus"
+    assert payload["vision"]["configured"] is True
+    assert payload["vision"]["model"] == "qwen-vl-from-env"
+    _assert_ai_response_safe(response.text)
+    get_settings.cache_clear()
+
+
+def test_ai_status_reports_missing_key_and_disabled_vision(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_bailian_env(monkeypatch)
+    monkeypatch.setenv("BAILIAN_VISION_ENABLED", "false")
+    monkeypatch.setenv("BAILIAN_VISION_MODEL", "qwen-vl-from-env")
+    get_settings.cache_clear()
+
+    with TestClient(app) as client:
+        response = client.get("/api/ai/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["configured"] is False
+    assert payload["sanitized_error"] == "BAILIAN_NOT_CONFIGURED"
+    assert payload["text"]["sanitized_error"] == "BAILIAN_NOT_CONFIGURED"
+    assert payload["vision"]["sanitized_error"] == "BAILIAN_VISION_DISABLED"
+    _assert_ai_response_safe(response.text)
+    get_settings.cache_clear()
+
+
+def test_ai_smoke_text_success_and_failure_are_sanitized() -> None:
+    with _override_ai_client(SmokeStubClient()):
+        with TestClient(app) as client:
+            success_response = client.post("/api/ai/smoke/text")
+
+    assert success_response.status_code == 200
+    assert success_response.json() == {
+        "provider": "bailian",
+        "model": "qwen3.6-plus",
+        "configured": True,
+        "success": True,
+        "fallback_used": False,
+        "sanitized_error": None,
+    }
+
+    auth_error = BailianAuthenticationError("auth failed")
+    with _override_ai_client(SmokeStubClient(chat_exc=auth_error)):
+        with TestClient(app) as client:
+            failure_response = client.post("/api/ai/smoke/text")
+
+    assert failure_response.status_code == 200
+    payload = failure_response.json()
+    assert payload["success"] is False
+    assert payload["configured"] is True
+    assert payload["sanitized_error"] == "BAILIAN_AUTHENTICATION_ERROR"
+    _assert_ai_response_safe(success_response.text + failure_response.text)
+
+
+def test_ai_smoke_vision_success_disabled_and_missing_model_are_sanitized() -> None:
+    with _override_ai_client(SmokeStubClient()):
+        with TestClient(app) as client:
+            success_response = client.post("/api/ai/smoke/vision")
+
+    assert success_response.status_code == 200
+    assert success_response.json()["success"] is True
+    assert success_response.json()["model"] == "qwen-vl-from-env"
+
+    with _override_ai_client(SmokeStubClient(vision_exc=BailianVisionDisabledError("disabled"))):
+        with TestClient(app) as client:
+            disabled_response = client.post("/api/ai/smoke/vision")
+
+    assert disabled_response.status_code == 200
+    disabled_payload = disabled_response.json()
+    assert disabled_payload["success"] is False
+    assert disabled_payload["configured"] is False
+    assert disabled_payload["sanitized_error"] == "BAILIAN_VISION_DISABLED"
+
+    missing_model_error = BailianVisionModelNotConfiguredError("missing")
+    with _override_ai_client(SmokeStubClient(vision_exc=missing_model_error)):
+        with TestClient(app) as client:
+            missing_model_response = client.post("/api/ai/smoke/vision")
+
+    assert missing_model_response.status_code == 200
+    missing_payload = missing_model_response.json()
+    assert missing_payload["success"] is False
+    assert missing_payload["configured"] is False
+    assert missing_payload["sanitized_error"] == "BAILIAN_VISION_MODEL_NOT_CONFIGURED"
+    _assert_ai_response_safe(success_response.text + disabled_response.text + missing_model_response.text)
+
+
 def test_ai_api_endpoints_return_structured_payloads() -> None:
     class StubClient:
         async def chat(
@@ -361,6 +468,38 @@ class _override_ai_client:
 
     def __exit__(self, *args: object) -> None:
         app.dependency_overrides.pop(get_bailian_client, None)
+
+
+class SmokeStubClient:
+    model_name = "qwen3.6-plus"
+    vision_model_name = "qwen-vl-from-env"
+
+    def __init__(
+        self,
+        *,
+        chat_exc: Exception | None = None,
+        vision_exc: Exception | None = None,
+    ) -> None:
+        self.chat_exc = chat_exc
+        self.vision_exc = vision_exc
+
+    async def chat(self, *args, **kwargs) -> BailianChatCompletion:  # noqa: ANN002, ANN003
+        if self.chat_exc is not None:
+            raise self.chat_exc
+        return BailianChatCompletion(content="{\"ok\": true}", model=self.model_name)
+
+    async def vision_chat(self, *args, **kwargs) -> BailianChatCompletion:  # noqa: ANN002, ANN003
+        if self.vision_exc is not None:
+            raise self.vision_exc
+        return BailianChatCompletion(content="{\"ok\": true}", model=self.vision_model_name)
+
+
+def _assert_ai_response_safe(text: str) -> None:
+    lowered = text.lower()
+    assert "configured-placeholder" not in text
+    assert "authorization" not in lowered
+    assert "bearer" not in lowered
+    assert "api_key" not in lowered
 
 
 def _clear_bailian_env(monkeypatch: pytest.MonkeyPatch) -> None:

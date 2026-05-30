@@ -174,6 +174,10 @@ def test_url_intake_qwen_mock_success_creates_job_link_and_draft(
     payload = response.json()
     assert payload["status"] == "draft_ready"
     assert payload["message"] == "draft_ready"
+    assert payload["ai_result_type"] == "real_qwen"
+    assert payload["ai_fallback_used"] is False
+    assert payload["model_used"] == "qwen3.6-plus"
+    assert payload["error_code"] is None
     assert payload["draft"]["product_name_cn"] == "宠物凉感垫"
     assert fake_fetch.calls == ["https://item.jd.com/100012043978.html"]
     assert len(fake_ai.calls) == 1
@@ -276,6 +280,9 @@ def test_url_fetch_disabled_returns_needs_screenshot_without_fetch_or_ai(
     payload = response.json()
     assert payload["status"] == "needs_screenshot"
     assert payload["message"] == "请上传截图继续分析"
+    assert payload["ai_result_type"] == "manual_required"
+    assert payload["ai_fallback_used"] is False
+    assert payload["error_code"] == "DOMESTIC_URL_FETCH_DISABLED"
     assert payload["draft"]["low_confidence"] is True
     assert fake_fetch.calls == []
     assert fake_ai.calls == []
@@ -305,6 +312,8 @@ def test_url_missing_item_id_creates_needs_screenshot_draft(
     assert response.status_code == 201
     payload = response.json()
     assert payload["status"] == "needs_screenshot"
+    assert payload["ai_result_type"] == "manual_required"
+    assert payload["ai_fallback_used"] is False
     assert fake_ai.calls == []
     with session_factory() as db:
         link = db.scalar(select(DomesticProductLink).where(DomesticProductLink.import_job_id == payload["job_id"]))
@@ -336,9 +345,11 @@ def test_url_intake_fetch_failure_falls_back_to_needs_screenshot(
     payload = response.json()
     assert payload["status"] == "needs_screenshot"
     assert payload["message"] == "请上传截图继续分析"
+    assert payload["ai_result_type"] == "manual_required"
+    assert payload["ai_fallback_used"] is False
+    assert payload["error_code"] == "URL_FETCH_TIMEOUT"
     assert payload["draft"]["product_name_cn"] is None
     assert fake_ai.calls == []
-    assert "URL_FETCH_TIMEOUT" not in response.text
 
     with session_factory() as db:
         assert db.scalar(select(func.count()).select_from(ProductImportJob)) == 1
@@ -414,6 +425,13 @@ def test_url_ai_parse_or_confidence_failures_return_safe_draft(
     payload = response.json()
     assert payload["status"] == expected_status
     assert payload["message"] == "请上传截图继续分析"
+    if expected_error in {"AI_RESPONSE_PARSE_ERROR", "AI_RESPONSE_SCHEMA_ERROR"}:
+        assert payload["ai_result_type"] == "fallback"
+        assert payload["ai_fallback_used"] is True
+    else:
+        assert payload["ai_result_type"] == "manual_required"
+        assert payload["ai_fallback_used"] is False
+    assert payload["error_code"] == expected_error
     assert "secret-token" not in response.text
     with session_factory() as db:
         job = db.get(ProductImportJob, payload["job_id"])
@@ -443,6 +461,9 @@ def test_url_ai_error_returns_safe_failure_without_secret_leak(
     payload = response.json()
     assert payload["status"] == "failed"
     assert payload["message"] == "请上传截图继续分析"
+    assert payload["ai_result_type"] == "fallback"
+    assert payload["ai_fallback_used"] is True
+    assert payload["error_code"] == "BAILIAN_TIMEOUT"
     assert "sentinel-secret" not in response.text
     assert "Authorization" not in response.text
     assert "Bearer" not in response.text

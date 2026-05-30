@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models import Company, DomesticProductLink, ProductDraft, ProductImportJob
-from app.schemas.product_intake import ProductDraftRead, ProductUrlIntakeResponse, QwenProductUnderstandingResponse
+from app.schemas.product_intake import (
+    AiResultType,
+    ProductDraftRead,
+    ProductUrlIntakeResponse,
+    QwenProductUnderstandingResponse,
+)
 from app.services.ai import BailianClient, BailianError
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_url_product_understanding_messages
@@ -61,7 +66,14 @@ async def analyze_url_intake(
             code="URL_PARSE_FAILED",
             message=SCREENSHOT_MESSAGE,
         )
-        return _build_url_response(job, draft, status="needs_screenshot", message=SCREENSHOT_MESSAGE)
+        return _build_url_response(
+            job,
+            draft,
+            status="needs_screenshot",
+            message=SCREENSHOT_MESSAGE,
+            ai_result_type="manual_required",
+            ai_fallback_used=False,
+        )
 
     if not settings.enable_domestic_url_fetch:
         draft = _create_blank_draft(
@@ -71,7 +83,14 @@ async def analyze_url_intake(
             code="DOMESTIC_URL_FETCH_DISABLED",
             message=SCREENSHOT_MESSAGE,
         )
-        return _build_url_response(job, draft, status="needs_screenshot", message=SCREENSHOT_MESSAGE)
+        return _build_url_response(
+            job,
+            draft,
+            status="needs_screenshot",
+            message=SCREENSHOT_MESSAGE,
+            ai_result_type="manual_required",
+            ai_fallback_used=False,
+        )
 
     fetch_result = await fetch_domestic_product_page(
         DomesticPageFetchInput(
@@ -91,11 +110,17 @@ async def analyze_url_intake(
             code=fetch_result.error_code or "URL_PARSE_FAILED",
             message=SCREENSHOT_MESSAGE,
         )
-        return _build_url_response(job, draft, status="needs_screenshot", message=SCREENSHOT_MESSAGE)
+        return _build_url_response(
+            job,
+            draft,
+            status="needs_screenshot",
+            message=SCREENSHOT_MESSAGE,
+            ai_result_type="manual_required",
+            ai_fallback_used=False,
+        )
 
     try:
         completion = await _call_qwen_for_url(client, parsed_url, fetch_result)
-        understanding = QwenProductUnderstandingResponse.model_validate(parse_json_object(completion.content))
     except BailianError as exc:
         draft = _create_blank_draft(
             db,
@@ -104,10 +129,18 @@ async def analyze_url_intake(
             code=exc.code,
             message=SCREENSHOT_MESSAGE,
         )
-        job.model_used = getattr(exc, "model", None)
-        db.commit()
-        db.refresh(job)
-        return _build_url_response(job, draft, status="failed", message=SCREENSHOT_MESSAGE)
+        return _build_url_response(
+            job,
+            draft,
+            status="failed",
+            message=SCREENSHOT_MESSAGE,
+            ai_result_type="fallback",
+            ai_fallback_used=True,
+        )
+
+    job.model_used = completion.model
+    try:
+        understanding = QwenProductUnderstandingResponse.model_validate(parse_json_object(completion.content))
     except AiJsonParseError:
         draft = _create_blank_draft(
             db,
@@ -115,8 +148,16 @@ async def analyze_url_intake(
             link,
             code="AI_RESPONSE_PARSE_ERROR",
             message=SCREENSHOT_MESSAGE,
+            model_used=completion.model,
         )
-        return _build_url_response(job, draft, status="failed", message=SCREENSHOT_MESSAGE)
+        return _build_url_response(
+            job,
+            draft,
+            status="failed",
+            message=SCREENSHOT_MESSAGE,
+            ai_result_type="fallback",
+            ai_fallback_used=True,
+        )
     except ValidationError:
         draft = _create_blank_draft(
             db,
@@ -124,10 +165,17 @@ async def analyze_url_intake(
             link,
             code="AI_RESPONSE_SCHEMA_ERROR",
             message=SCREENSHOT_MESSAGE,
+            model_used=completion.model,
         )
-        return _build_url_response(job, draft, status="failed", message=SCREENSHOT_MESSAGE)
+        return _build_url_response(
+            job,
+            draft,
+            status="failed",
+            message=SCREENSHOT_MESSAGE,
+            ai_result_type="fallback",
+            ai_fallback_used=True,
+        )
 
-    job.model_used = completion.model
     if _requires_screenshot(understanding):
         draft = _create_blank_draft(
             db,
@@ -137,7 +185,14 @@ async def analyze_url_intake(
             message=SCREENSHOT_MESSAGE,
             model_used=completion.model,
         )
-        return _build_url_response(job, draft, status="needs_screenshot", message=SCREENSHOT_MESSAGE)
+        return _build_url_response(
+            job,
+            draft,
+            status="needs_screenshot",
+            message=SCREENSHOT_MESSAGE,
+            ai_result_type="manual_required",
+            ai_fallback_used=False,
+        )
 
     draft = _create_draft_from_understanding(
         db,
@@ -153,9 +208,23 @@ async def analyze_url_intake(
         db.commit()
         db.refresh(job)
         db.refresh(draft)
-        return _build_url_response(job, draft, status="needs_screenshot", message=SCREENSHOT_MESSAGE)
+        return _build_url_response(
+            job,
+            draft,
+            status="needs_screenshot",
+            message=SCREENSHOT_MESSAGE,
+            ai_result_type="manual_required",
+            ai_fallback_used=False,
+        )
 
-    return _build_url_response(job, draft, status="draft_ready", message="draft_ready")
+    return _build_url_response(
+        job,
+        draft,
+        status="draft_ready",
+        message="draft_ready",
+        ai_result_type="real_qwen",
+        ai_fallback_used=False,
+    )
 
 
 def _create_url_job_and_link(
@@ -345,12 +414,19 @@ def _build_url_response(
     *,
     status: str,
     message: str,
+    ai_result_type: AiResultType,
+    ai_fallback_used: bool,
 ) -> ProductUrlIntakeResponse:
     return ProductUrlIntakeResponse(
         job_id=job.id,
         draft_id=draft.id,
         status=status,
         message=message,
+        ai_result_type=ai_result_type,
+        ai_fallback_used=ai_fallback_used,
+        model_used=job.model_used,
+        error_code=job.error_code,
+        error_message=job.error_message,
         draft=ProductDraftRead.model_validate(draft),
     )
 

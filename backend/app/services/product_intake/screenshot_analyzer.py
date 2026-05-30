@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import Settings, get_settings
 from app.models import Company, ProductDraft, ProductImportAsset, ProductImportJob
 from app.schemas.product_intake import (
+    AiResultType,
     ProductDraftSummary,
     ProductDraftRead,
     ProductImportAssetRead,
@@ -115,18 +116,18 @@ async def analyze_screenshot_upload(
             db,
             job,
             code="BAILIAN_VISION_DISABLED",
-            message="Vision analysis is disabled; a manual draft was created.",
+            message="视觉模型未启用，请人工补全商品信息。",
         )
-        return _build_screenshot_response(job, asset, draft)
+        return _build_screenshot_response(job, asset, draft, ai_result_type="fallback", ai_fallback_used=True)
 
     if not settings.bailian_vision_model:
         draft = _create_fallback_draft(
             db,
             job,
             code="BAILIAN_VISION_MODEL_NOT_CONFIGURED",
-            message="Vision model is not configured; a manual draft was created.",
+            message="视觉模型未配置，请配置视觉模型后再启用截图识别。",
         )
-        return _build_screenshot_response(job, asset, draft)
+        return _build_screenshot_response(job, asset, draft, ai_result_type="fallback", ai_fallback_used=True)
 
     try:
         completion = await _call_vision_model(
@@ -134,8 +135,6 @@ async def analyze_screenshot_upload(
             screenshot=screenshot,
             source_platform=normalized_platform,
         )
-        parsed = parse_json_object(completion.content)
-        understanding = QwenProductUnderstandingResponse.model_validate(parsed)
     except BailianError as exc:
         draft = _create_fallback_draft(
             db,
@@ -143,25 +142,31 @@ async def analyze_screenshot_upload(
             code=exc.code,
             message=_safe_fallback_message(exc.code, str(exc)),
         )
-        return _build_screenshot_response(job, asset, draft)
+        return _build_screenshot_response(job, asset, draft, ai_result_type="fallback", ai_fallback_used=True)
+
+    job.model_used = completion.model
+    try:
+        parsed = parse_json_object(completion.content)
+        understanding = QwenProductUnderstandingResponse.model_validate(parsed)
     except AiJsonParseError:
         draft = _create_fallback_draft(
             db,
             job,
             code="AI_RESPONSE_PARSE_ERROR",
             message="Vision model response was not valid JSON; a manual draft was created.",
+            model_used=completion.model,
         )
-        return _build_screenshot_response(job, asset, draft)
+        return _build_screenshot_response(job, asset, draft, ai_result_type="fallback", ai_fallback_used=True)
     except ValidationError:
         draft = _create_fallback_draft(
             db,
             job,
             code="AI_RESPONSE_SCHEMA_ERROR",
             message="Vision model response did not match the expected product draft schema.",
+            model_used=completion.model,
         )
-        return _build_screenshot_response(job, asset, draft)
+        return _build_screenshot_response(job, asset, draft, ai_result_type="fallback", ai_fallback_used=True)
 
-    job.model_used = completion.model
     if _requires_manual_blank_draft(understanding):
         draft = _create_fallback_draft(
             db,
@@ -170,7 +175,7 @@ async def analyze_screenshot_upload(
             message="The screenshot did not identify a product clearly; a manual draft was created.",
             model_used=completion.model,
         )
-        return _build_screenshot_response(job, asset, draft)
+        return _build_screenshot_response(job, asset, draft, ai_result_type="manual_required", ai_fallback_used=False)
 
     draft = _create_draft_from_understanding(
         db,
@@ -178,7 +183,8 @@ async def analyze_screenshot_upload(
         understanding=understanding,
         source_platform_hint=normalized_platform,
     )
-    return _build_screenshot_response(job, asset, draft)
+    result_type: AiResultType = "manual_required" if understanding.confidence_score < LOW_CONFIDENCE_THRESHOLD else "real_qwen"
+    return _build_screenshot_response(job, asset, draft, ai_result_type=result_type, ai_fallback_used=False)
 
 
 def get_job_detail(db: Session, job_id: int) -> ProductImportJobDetailResponse | None:
@@ -414,6 +420,9 @@ def _build_screenshot_response(
     job: ProductImportJob,
     asset: ProductImportAsset,
     draft: ProductDraft,
+    *,
+    ai_result_type: AiResultType,
+    ai_fallback_used: bool,
 ) -> ProductScreenshotIntakeResponse:
     draft_summary = ProductDraftRead.model_validate(draft)
     next_action = "review_draft"
@@ -427,6 +436,9 @@ def _build_screenshot_response(
         job_status=job.status,
         draft_status=draft.status,
         low_confidence=draft_summary.low_confidence,
+        ai_result_type=ai_result_type,
+        ai_fallback_used=ai_fallback_used,
+        model_used=job.model_used,
         error_code=job.error_code,
         error_message=job.error_message,
         next_action=next_action,
@@ -438,6 +450,8 @@ def _build_screenshot_response(
 def _safe_fallback_message(code: str, raw_message: str) -> str:
     safe = sanitize_intake_text(raw_message, max_length=160) or "Vision analysis failed."
     generic_by_code = {
+        "BAILIAN_VISION_DISABLED": "视觉模型未启用，请人工补全商品信息。",
+        "BAILIAN_VISION_MODEL_NOT_CONFIGURED": "视觉模型未配置，请配置视觉模型后再启用截图识别。",
         "BAILIAN_NOT_CONFIGURED": "Bailian API key is not configured; a manual draft was created.",
         "BAILIAN_AUTHENTICATION_ERROR": "Vision provider authentication failed; a manual draft was created.",
         "BAILIAN_RATE_LIMITED": "Vision provider rate limit was reached; a manual draft was created.",

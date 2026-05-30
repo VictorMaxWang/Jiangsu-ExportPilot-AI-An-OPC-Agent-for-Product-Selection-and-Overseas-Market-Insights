@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 
 
 SourcePlatform = Literal["taobao", "tmall", "pinduoduo", "jd", "unknown"]
+AiResultType = Literal["real_qwen", "fallback", "manual_required"]
 EvidenceSource = Literal[
     "screenshot_text",
     "screenshot_visual",
@@ -323,6 +324,9 @@ class ProductScreenshotIntakeResponse(BaseModel):
     job_status: str
     draft_status: str
     low_confidence: bool
+    ai_result_type: AiResultType
+    ai_fallback_used: bool
+    model_used: str | None = None
     error_code: str | None = None
     error_message: str | None = None
     next_action: Literal["review_draft", "manual_review", "manual_fill"]
@@ -340,4 +344,9 @@ class ProductUrlIntakeResponse(BaseModel):
     draft_id: int
     status: Literal["draft_ready", "needs_screenshot", "failed"]
     message: str
+    ai_result_type: AiResultType
+    ai_fallback_used: bool
+    model_used: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
     draft: ProductDraftRead

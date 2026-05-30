@@ -25,6 +25,26 @@ class AiChatResponse(BaseModel):
     usage: dict[str, Any] | None = None
 
 
+class AiSmokeResponse(BaseModel):
+    provider: Literal["bailian"] = "bailian"
+    model: str | None
+    configured: bool
+    success: bool
+    fallback_used: bool
+    sanitized_error: str | None = None
+
+
+class AiStatusResponse(BaseModel):
+    provider: Literal["bailian"] = "bailian"
+    model: str
+    configured: bool
+    success: bool = False
+    fallback_used: bool = False
+    sanitized_error: str | None = None
+    text: AiSmokeResponse
+    vision: AiSmokeResponse
+
+
 class ProductKeywordsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

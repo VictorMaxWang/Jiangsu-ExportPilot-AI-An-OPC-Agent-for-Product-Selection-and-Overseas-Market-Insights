@@ -89,6 +89,7 @@ export type ProductIntakeEvidenceSource =
   | "manual_text"
   | "model_inference";
 export type ProductDraftStatus = "draft" | "confirmed" | "rejected";
+export type ProductIntakeAiResultType = "real_qwen" | "fallback" | "manual_required";
 export type ProductIntakeJobStatus =
   | "pending"
   | "processing"
@@ -213,6 +214,9 @@ export type ProductScreenshotIntakeResponse = {
   job_status: ProductIntakeJobStatus | string;
   draft_status: ProductDraftStatus | string;
   low_confidence: boolean;
+  ai_result_type: ProductIntakeAiResultType;
+  ai_fallback_used: boolean;
+  model_used: string | null;
   error_code: string | null;
   error_message: string | null;
   next_action: ProductScreenshotNextAction;
@@ -225,6 +229,11 @@ export type ProductUrlIntakeResponse = {
   draft_id: number;
   status: ProductUrlIntakeStatus;
   message: string;
+  ai_result_type: ProductIntakeAiResultType;
+  ai_fallback_used: boolean;
+  model_used: string | null;
+  error_code: string | null;
+  error_message: string | null;
   draft: ProductDraft;
 };
 
