@@ -18,6 +18,7 @@ from app.schemas.analysis import (
     ScoringSummary,
 )
 from app.schemas.ai import (
+    AiErrorStage,
     AiChatMessage,
     AiChatRequest,
     AiChatResponse,
@@ -191,6 +192,7 @@ __all__ = [
     "AiChatMessage",
     "AiChatRequest",
     "AiChatResponse",
+    "AiErrorStage",
     "AiSmokeResponse",
     "AiStatusResponse",
     "ApiCredentialCreate",

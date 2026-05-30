@@ -9,6 +9,7 @@ from app.core.config import Settings, get_settings
 from app.schemas import (
     AiChatRequest,
     AiChatResponse,
+    AiErrorStage,
     AiSmokeResponse,
     AiStatusResponse,
     MarketingCopyRequest,
@@ -39,6 +40,8 @@ from app.utils.redaction import redact_text
 
 
 router = APIRouter()
+
+VISION_SMOKE_RESPONSE_INVALID = "VISION_SMOKE_RESPONSE_INVALID"
 
 
 def get_bailian_client() -> BailianClient:
@@ -83,13 +86,7 @@ async def smoke_text(client: BailianClient = Depends(get_bailian_client)) -> AiS
             json_mode=True,
         )
     except BailianError as exc:
-        return AiSmokeResponse(
-            model=client.model_name,
-            configured=not isinstance(exc, BailianConfigurationError),
-            success=False,
-            fallback_used=False,
-            sanitized_error=exc.code,
-        )
+        return _smoke_error_response(client.model_name, exc, vision=False)
 
     if not result.content.strip():
         return AiSmokeResponse(
@@ -98,6 +95,8 @@ async def smoke_text(client: BailianClient = Depends(get_bailian_client)) -> AiS
             success=False,
             fallback_used=False,
             sanitized_error="EMPTY_PROVIDER_RESPONSE",
+            error_stage="response_parse",
+            suggested_action="Retry the text smoke; if it repeats, check the configured Bailian text model response format.",
         )
     return AiSmokeResponse(
         model=result.model,
@@ -118,22 +117,11 @@ async def smoke_vision(client: BailianClient = Depends(get_bailian_client)) -> A
             json_mode=True,
         )
     except BailianError as exc:
-        return AiSmokeResponse(
-            model=client.vision_model_name,
-            configured=not isinstance(exc, BailianConfigurationError),
-            success=False,
-            fallback_used=False,
-            sanitized_error=exc.code,
-        )
+        return _smoke_error_response(client.vision_model_name, exc, vision=True)
 
-    if not result.content.strip():
-        return AiSmokeResponse(
-            model=result.model,
-            configured=True,
-            success=False,
-            fallback_used=False,
-            sanitized_error="EMPTY_PROVIDER_RESPONSE",
-        )
+    validation_error = _validate_vision_smoke_content(result.content)
+    if validation_error is not None:
+        return _validation_error_for_vision_smoke(result.model, validation_error)
     return AiSmokeResponse(
         model=result.model,
         configured=True,
@@ -248,12 +236,15 @@ def _status_payload(
     configured: bool,
     sanitized_error: str | None,
 ) -> AiSmokeResponse:
+    error_stage, suggested_action = _configuration_diagnostics(sanitized_error)
     return AiSmokeResponse(
         model=model,
         configured=configured,
         success=False,
         fallback_used=False,
         sanitized_error=sanitized_error,
+        error_stage=error_stage,
+        suggested_action=suggested_action,
     )
 
 
@@ -274,7 +265,10 @@ def _build_vision_smoke_messages() -> list[dict[str, object]]:
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "This is a smoke test image. Return {\"ok\": true}."},
+                {
+                    "type": "text",
+                    "text": "Inspect this smoke test image and return exactly {\"ok\": true, \"image_seen\": true}.",
+                },
                 {"type": "image_url", "image_url": {"url": image_data_url}},
             ],
         },
@@ -286,6 +280,94 @@ def _small_png_base64() -> str:
     image = Image.new("RGB", (4, 4), color=(40, 120, 200))
     image.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _smoke_error_response(model: str | None, exc: BailianError, *, vision: bool) -> AiSmokeResponse:
+    return AiSmokeResponse(
+        model=model,
+        configured=not isinstance(exc, BailianConfigurationError),
+        success=False,
+        fallback_used=False,
+        sanitized_error=exc.code,
+        error_stage=_error_stage_for_exception(exc),
+        upstream_status_code=exc.status_code,
+        suggested_action=_suggested_action_for_exception(exc, vision=vision),
+    )
+
+
+def _error_stage_for_exception(exc: BailianError) -> AiErrorStage:
+    stage = getattr(exc, "error_stage", "unknown")
+    if stage in {
+        "request_build",
+        "upstream_http",
+        "response_parse",
+        "model_not_available",
+        "unsupported_input",
+        "unknown",
+    }:
+        return stage
+    return "unknown"
+
+
+def _validate_vision_smoke_content(content: str) -> str | None:
+    if not content.strip():
+        return "EMPTY_PROVIDER_RESPONSE"
+    try:
+        parsed = parse_json_object(content)
+    except AiJsonParseError:
+        return "AI_RESPONSE_PARSE_ERROR"
+    if parsed.get("ok") is not True or parsed.get("image_seen") is not True:
+        return VISION_SMOKE_RESPONSE_INVALID
+    return None
+
+
+def _validation_error_for_vision_smoke(model: str, sanitized_error: str) -> AiSmokeResponse:
+    return AiSmokeResponse(
+        model=model,
+        configured=True,
+        success=False,
+        fallback_used=False,
+        sanitized_error=sanitized_error,
+        error_stage="response_parse",
+        suggested_action=(
+            "Check that BAILIAN_VISION_MODEL supports image understanding through the OpenAI-compatible "
+            "chat completions image_url data URL format."
+        ),
+    )
+
+
+def _configuration_diagnostics(sanitized_error: str | None) -> tuple[AiErrorStage | None, str | None]:
+    if sanitized_error is None:
+        return None, None
+    if sanitized_error in {"BAILIAN_NOT_CONFIGURED", "BAILIAN_VISION_DISABLED", "BAILIAN_VISION_MODEL_NOT_CONFIGURED"}:
+        return "request_build", _suggested_action_for_code(sanitized_error, vision=True)
+    return "unknown", None
+
+
+def _suggested_action_for_exception(exc: BailianError, *, vision: bool) -> str:
+    if exc.status_code in {400, 404} and vision:
+        return (
+            "Check that BAILIAN_VISION_MODEL is a valid Qwen-VL model ID available to this Bailian/DashScope "
+            "account and region; do not switch models silently."
+        )
+    return _suggested_action_for_code(exc.code, vision=vision)
+
+
+def _suggested_action_for_code(code: str, *, vision: bool) -> str:
+    suggestions = {
+        "BAILIAN_NOT_CONFIGURED": "Set the backend DashScope credential in the runtime environment and restart the service.",
+        "BAILIAN_VISION_DISABLED": "Set BAILIAN_VISION_ENABLED=true only after configuring a valid Bailian vision model.",
+        "BAILIAN_VISION_MODEL_NOT_CONFIGURED": "Set BAILIAN_VISION_MODEL to a Bailian Qwen-VL model ID available to this account and region.",
+        "BAILIAN_AUTHENTICATION_ERROR": "Check the backend DashScope credential permissions without exposing the credential.",
+        "BAILIAN_RATE_LIMITED": "Retry later or reduce smoke frequency; keep the configured model unchanged.",
+        "BAILIAN_TIMEOUT": "Retry later and check network connectivity to Bailian/DashScope.",
+        "BAILIAN_RESPONSE_ERROR": "Check whether the configured model returns OpenAI-compatible chat completion JSON.",
+    }
+    if code == "BAILIAN_UPSTREAM_ERROR" and vision:
+        return "Check BAILIAN_VISION_MODEL availability for the current account and region, then rerun vision smoke."
+    if code == "BAILIAN_UPSTREAM_ERROR":
+        return "Check Bailian service availability and the configured text model ID."
+    return suggestions.get(code, "Review backend Bailian configuration and retry the smoke check.")
 
 
 def _structured_output_exception(

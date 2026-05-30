@@ -3,6 +3,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+AiErrorStage = Literal[
+    "request_build",
+    "upstream_http",
+    "response_parse",
+    "model_not_available",
+    "unsupported_input",
+    "unknown",
+]
+
+
 class AiChatMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -32,6 +42,9 @@ class AiSmokeResponse(BaseModel):
     success: bool
     fallback_used: bool
     sanitized_error: str | None = None
+    error_stage: AiErrorStage | None = None
+    upstream_status_code: int | None = None
+    suggested_action: str | None = None
 
 
 class AiStatusResponse(BaseModel):

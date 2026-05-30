@@ -41,6 +41,7 @@ FORMAT_TO_MIME_AND_EXT = {
 }
 LOW_CONFIDENCE_THRESHOLD = Decimal("0.65")
 MIN_IDENTIFIED_CONFIDENCE = Decimal("0.35")
+VISION_PRODUCTION_FAILURE_MESSAGE = "视觉模型未通过生产验收，请先上传截图后人工补全或配置可用视觉模型。"
 Image.MAX_IMAGE_PIXELS = 50_000_000
 
 _PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
@@ -153,7 +154,7 @@ async def analyze_screenshot_upload(
             db,
             job,
             code="AI_RESPONSE_PARSE_ERROR",
-            message="Vision model response was not valid JSON; a manual draft was created.",
+            message=VISION_PRODUCTION_FAILURE_MESSAGE,
             model_used=completion.model,
         )
         return _build_screenshot_response(job, asset, draft, ai_result_type="fallback", ai_fallback_used=True)
@@ -162,7 +163,7 @@ async def analyze_screenshot_upload(
             db,
             job,
             code="AI_RESPONSE_SCHEMA_ERROR",
-            message="Vision model response did not match the expected product draft schema.",
+            message=VISION_PRODUCTION_FAILURE_MESSAGE,
             model_used=completion.model,
         )
         return _build_screenshot_response(job, asset, draft, ai_result_type="fallback", ai_fallback_used=True)
@@ -453,11 +454,11 @@ def _safe_fallback_message(code: str, raw_message: str) -> str:
         "BAILIAN_VISION_DISABLED": "视觉模型未启用，请人工补全商品信息。",
         "BAILIAN_VISION_MODEL_NOT_CONFIGURED": "视觉模型未配置，请配置视觉模型后再启用截图识别。",
         "BAILIAN_NOT_CONFIGURED": "Bailian API key is not configured; a manual draft was created.",
-        "BAILIAN_AUTHENTICATION_ERROR": "Vision provider authentication failed; a manual draft was created.",
-        "BAILIAN_RATE_LIMITED": "Vision provider rate limit was reached; a manual draft was created.",
-        "BAILIAN_TIMEOUT": "Vision analysis timed out; a manual draft was created.",
-        "BAILIAN_UPSTREAM_ERROR": "Vision provider returned an upstream error; a manual draft was created.",
-        "BAILIAN_RESPONSE_ERROR": "Vision provider response could not be read; a manual draft was created.",
+        "BAILIAN_AUTHENTICATION_ERROR": VISION_PRODUCTION_FAILURE_MESSAGE,
+        "BAILIAN_RATE_LIMITED": VISION_PRODUCTION_FAILURE_MESSAGE,
+        "BAILIAN_TIMEOUT": VISION_PRODUCTION_FAILURE_MESSAGE,
+        "BAILIAN_UPSTREAM_ERROR": VISION_PRODUCTION_FAILURE_MESSAGE,
+        "BAILIAN_RESPONSE_ERROR": VISION_PRODUCTION_FAILURE_MESSAGE,
     }
     return generic_by_code.get(code, safe)
 
