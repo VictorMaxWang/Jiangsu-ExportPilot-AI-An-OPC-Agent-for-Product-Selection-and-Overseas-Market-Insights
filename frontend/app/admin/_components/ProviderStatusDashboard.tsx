@@ -63,7 +63,7 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
 
   async function loadStatuses() {
     if (requireAdminPassword && !adminPassword.trim()) {
-      setErrorMessage("请输入 Admin Password 后加载状态。");
+      setErrorMessage("请输入管理员密码后加载状态。");
       return;
     }
 
@@ -84,7 +84,7 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
 
   async function runProviderTest(provider: ProviderId) {
     if (requireAdminPassword && !adminPassword.trim()) {
-      setErrorMessage("请输入 Admin Password 后执行测试。");
+      setErrorMessage("请输入管理员密码后执行测试。");
       return;
     }
 
@@ -95,7 +95,7 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
       setLastTests((current) => ({ ...current, [provider]: result }));
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        setErrorMessage("Admin Password 无效或缺失，未执行测试。");
+        setErrorMessage("管理员密码无效或缺失，未执行测试。");
         return;
       }
       setLastTests((current) => ({
@@ -189,11 +189,11 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
           <table className="w-full min-w-[920px] border-collapse text-left text-sm">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
-                <th className="px-4 py-3 font-semibold">Provider</th>
+                <th className="px-4 py-3 font-semibold">数据源</th>
                 <th className="px-4 py-3 font-semibold">优先级</th>
                 <th className="px-4 py-3 font-semibold">状态</th>
                 <th className="px-4 py-3 font-semibold">默认启用</th>
-                <th className="px-4 py-3 font-semibold">Fallback 文件</th>
+                <th className="px-4 py-3 font-semibold">兜底文件</th>
                 <th className="px-4 py-3 font-semibold">测试</th>
                 <th className="px-4 py-3 font-semibold">最近测试结果</th>
               </tr>
@@ -256,7 +256,7 @@ function AdminPasswordPanel({
   return (
     <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4">
       <div>
-        <p className="text-sm font-semibold text-ink">Admin Password</p>
+        <p className="text-sm font-semibold text-ink">管理员密码</p>
         <p className="mt-1 text-sm leading-6 text-slate-600">
           这里只显示配置状态，不显示密钥。密码仅保存在当前页面会话状态中，刷新后会清空。
         </p>
@@ -272,7 +272,7 @@ function AdminPasswordPanel({
             }
           }}
           className="min-h-10 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm text-ink outline-none transition focus:border-ink focus:ring-2 focus:ring-slate-200"
-          placeholder="输入 Admin Password"
+          placeholder="输入管理员密码"
           autoComplete="current-password"
         />
         <button

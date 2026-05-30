@@ -26,7 +26,7 @@ import {
 } from "../../_lib/api-client";
 
 const DEMO_SOURCE_NOTICE =
-  "当前 Demo 使用公开 API、缓存、样本数据与 CSV fallback。竞品样本不代表真实销量，仅作为价格与内容信号。";
+  "当前 Demo 使用公开 API、缓存、样本数据与 CSV 兜底。竞品样本不代表真实销量，仅作为价格与内容信号。";
 
 type DashboardDetailWorkspaceProps = {
   analysisId: number;
@@ -76,7 +76,8 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
     return (
       <div>
         <PageHeader
-          eyebrow="市场看板 / Market Dashboard"
+          eyebrow="市场看板"
+          eyebrowEn="Market Dashboard"
           title={`分析 #${analysisId} 市场机会看板`}
           description="正在读取本次智能体分析的评分、竞品价格带、内容趋势和数据来源。"
         />
@@ -89,7 +90,8 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
     return (
       <div>
         <PageHeader
-          eyebrow="市场看板 / Market Dashboard"
+          eyebrow="市场看板"
+          eyebrowEn="Market Dashboard"
           title={`分析 #${analysisId} 市场机会看板`}
           description="看板只展示已完成或已落库的分析结果，不会在页面加载时重新调用第三方 API。"
         />
@@ -123,7 +125,8 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
     <div>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <PageHeader
-          eyebrow="市场看板 / Market Dashboard"
+          eyebrow="市场看板"
+          eyebrowEn="Market Dashboard"
           title={`分析 #${dashboard.analysis_id} 市场机会看板`}
           description="汇总产品机会评分、国家推荐、竞品价格区间、趋势主题、风险提示和数据来源，便于比赛现场讲解选品逻辑。"
         />
@@ -154,8 +157,8 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
         {fallbackUsed ? (
           <FallbackNotice
             source="csv"
-            title="fallback_used 不是失败"
-            description="该结果包含公开 API、样本、缓存或 CSV fallback 信号，适合 Demo 展示和方向判断，正式投放前仍需复核实时平台证据。"
+            title="使用兜底不是失败"
+            description="该结果包含公开 API、样本、缓存或 CSV 兜底信号，适合 Demo 展示和方向判断，正式投放前仍需复核实时平台证据。"
           />
         ) : null}
       </div>
@@ -202,7 +205,7 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
               <ChartPanel
                 title="产品机会评分"
                 description="按产品与国家组合展示 total_score。"
-                sourceNote="数据源：后端 OpportunityScore 聚合公开 API、CSV fallback、内容趋势与贸易样本后生成。"
+                sourceNote="数据源：后端机会评分聚合公开 API、CSV 兜底、内容趋势与贸易样本后生成。"
                 isEmpty={dashboard.product_scores.length === 0}
               >
                 <ScoreRankingBarChart items={dashboard.product_scores} />
@@ -220,7 +223,7 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
               <ChartPanel
                 title="竞品价格区间"
                 description="展示公开 API 或样本竞品的最低价、中位价和最高价。"
-                sourceNote="数据源：Etsy/平台样本与 competitor_samples.csv；竞品样本不代表真实销量，仅作为价格与内容信号。"
+                sourceNote="数据源：Etsy/平台样本与竞品样本 CSV；竞品样本不代表真实销量，仅作为价格与内容信号。"
                 isEmpty={dashboard.price_ranges.length === 0}
               >
                 <CompetitorPriceRangeChart items={dashboard.price_ranges} />
@@ -229,11 +232,11 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
 
               <ChartPanel
                 title="内容趋势标签云"
-                description="来自 R17 content_trends 工作流状态；没有趋势主题时不编造标签。"
-                sourceNote="数据源：YouTube、讨论样本、内容趋势 CSV fallback 与 AI/规则解析结果。"
-                isEmpty={dashboard.content_themes.length === 0}
-                emptyTitle="暂无趋势主题"
-                emptyDescription="当前分析没有可展示的 content_themes。"
+            description="来自内容趋势工作流状态；没有趋势主题时不编造标签。"
+            sourceNote="数据源：YouTube、讨论样本、内容趋势 CSV 兜底与 AI/规则解析结果。"
+            isEmpty={dashboard.content_themes.length === 0}
+            emptyTitle="暂无趋势主题"
+            emptyDescription="当前分析没有可展示的内容趋势主题。"
               >
                 <ContentThemeCloud items={dashboard.content_themes} />
               </ChartPanel>
@@ -257,7 +260,7 @@ function RecommendationsPanel({ items }: { items: DashboardRecommendation[] }) {
       <h2 className="text-lg font-semibold text-ink">推荐产品卡片</h2>
       <div className="mt-4 grid gap-3">
         {items.length === 0 ? (
-          <EmptyState title="暂无推荐结果" description="当前分析没有可展示的 top_recommendations。" />
+          <EmptyState title="暂无推荐结果" description="当前分析没有可展示的推荐结果。" />
         ) : (
           items.map((item) => (
             <article key={`${item.product_id}-${item.country}`} className="border-t border-slate-100 pt-4 first:border-t-0 first:pt-0">
@@ -269,7 +272,7 @@ function RecommendationsPanel({ items }: { items: DashboardRecommendation[] }) {
                   <p className="mt-1 text-xs font-semibold text-river">{item.country} · {formatScore(item.total_score)} 分</p>
                 </div>
                 {item.fallback_used || item.ai_fallback_used ? (
-                  <span className="rounded-md bg-wheat/15 px-2 py-1 text-xs font-semibold text-ink">fallback</span>
+                  <span className="rounded-md bg-wheat/15 px-2 py-1 text-xs font-semibold text-ink">兜底</span>
                 ) : null}
               </div>
               {item.reason ? <p className="mt-3 text-sm leading-6 text-slate-600">{item.reason}</p> : null}
@@ -298,7 +301,7 @@ function RiskPanel({ items }: { items: DashboardRiskCard[] }) {
             <article key={`${item.title}-${item.product_id ?? "all"}-${item.country ?? "all"}-${index}`} className="border-t border-slate-100 pt-4 first:border-t-0 first:pt-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-md px-2 py-1 text-xs font-semibold ${riskClassName(item.severity)}`}>
-                  {item.severity}
+                  {riskSeverityLabel(item.severity)}
                 </span>
                 <h3 className="text-sm font-semibold text-ink">{item.title}</h3>
               </div>
@@ -328,7 +331,7 @@ function SourcesPanel({ items }: { items: DashboardDataSourceUsed[] }) {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-ink">{item.provider}</p>
                 <span className={`rounded-md px-2 py-1 text-xs font-semibold ${item.fallback_used ? "bg-wheat/15 text-ink" : "bg-jade/10 text-jade"}`}>
-                  {item.fallback_used ? "fallback" : item.api_invoked ? "api" : item.source_type}
+                  {dataSourceTypeLabel(item)}
                 </span>
               </div>
               <p className="mt-1 text-sm leading-6 text-slate-600">{item.label}</p>
@@ -393,4 +396,29 @@ function riskClassName(severity: DashboardRiskCard["severity"]): string {
     high: "bg-red-50 text-red-700",
   };
   return classNames[severity];
+}
+
+function riskSeverityLabel(severity: DashboardRiskCard["severity"]): string {
+  const labels: Record<DashboardRiskCard["severity"], string> = {
+    low: "低",
+    medium: "中",
+    high: "高",
+  };
+  return labels[severity];
+}
+
+function dataSourceTypeLabel(item: DashboardDataSourceUsed): string {
+  if (item.fallback_used) {
+    return "兜底";
+  }
+  if (item.api_invoked) {
+    return "API";
+  }
+  const labels: Record<string, string> = {
+    csv_fallback: "CSV 兜底",
+    sample: "样本",
+    cached: "缓存",
+    public_api: "公开 API",
+  };
+  return labels[item.source_type] ?? item.source_type;
 }

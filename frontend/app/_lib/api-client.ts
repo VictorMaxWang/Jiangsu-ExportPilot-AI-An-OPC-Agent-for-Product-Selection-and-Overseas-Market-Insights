@@ -999,13 +999,13 @@ async function parseErrorResponse(response: Response): Promise<unknown> {
 
 function buildErrorMessage(status: number, detail: unknown): string {
   if (status === 401) {
-    return "Admin Password 无效或缺失。";
+    return "管理员密码无效或缺失。";
   }
   if (isRecord(detail)) {
     const nested = detail.detail;
     if (isRecord(nested)) {
       if (nested.code === "BAILIAN_NOT_CONFIGURED") {
-        return "Bailian is not configured on the backend.";
+        return "后端未配置 Bailian。";
       }
       if (typeof nested.message === "string") {
         return nested.message;

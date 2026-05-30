@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AppShell } from "./_components/AppShell";
+import { LanguageProvider } from "./_components/LanguageProvider";
 
 export const metadata: Metadata = {
   title: "苏品智航 / Jiangsu ExportPilot",
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body>
-        <AppShell>{children}</AppShell>
+        <LanguageProvider>
+          <AppShell>{children}</AppShell>
+        </LanguageProvider>
       </body>
     </html>
   );

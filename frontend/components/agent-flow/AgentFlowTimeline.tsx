@@ -14,6 +14,18 @@ export const AGENT_STEP_LABELS: Record<string, string> = {
   "09_report_prep": "报告准备智能体",
 };
 
+export const AGENT_NODE_LABELS: Record<string, string> = {
+  "01_company_profiling": "企业画像",
+  "02_product_understanding": "产品理解",
+  "03_data_collection": "数据采集",
+  "04_competitor_analysis": "竞品分析",
+  "05_market_profiling": "市场画像",
+  "06_content_trend": "内容趋势",
+  "07_opportunity_scoring": "机会评分",
+  "08_marketing_prep": "营销准备",
+  "09_report_prep": "报告准备",
+};
+
 const AGENT_STEP_DESCRIPTIONS: Record<string, string> = {
   "01_company_profiling": "读取企业地区、产业带、目标市场和出海背景，形成分析上下文。",
   "02_product_understanding": "理解产品名称、品类、材质、认证、价格和关键词信号。",
@@ -81,7 +93,7 @@ function AgentFlowStep({
               <h3 className="text-base font-semibold text-ink">
                 {AGENT_STEP_LABELS[step.step_id] ?? step.title}
               </h3>
-              <span className="text-xs font-medium text-slate-400">{step.node}</span>
+              <span className="text-xs font-medium text-slate-400">{AGENT_NODE_LABELS[step.step_id] ?? step.node}</span>
             </div>
             <p className="mt-1 text-sm leading-6 text-slate-600">
               {AGENT_STEP_DESCRIPTIONS[step.step_id] ?? "执行智能体分析节点。"}
@@ -143,11 +155,11 @@ function MetaItem({ label, value }: { label: string; value: string }) {
 
 function statusLabel(status: AnalysisWorkflowStatus): string {
   const labels: Record<AnalysisWorkflowStatus, string> = {
-    waiting: "waiting",
-    running: "running",
-    success: "success",
-    failed: "failed",
-    fallback_used: "fallback_used",
+    waiting: "等待中",
+    running: "运行中",
+    success: "已完成",
+    failed: "失败",
+    fallback_used: "使用兜底",
   };
   return labels[status];
 }

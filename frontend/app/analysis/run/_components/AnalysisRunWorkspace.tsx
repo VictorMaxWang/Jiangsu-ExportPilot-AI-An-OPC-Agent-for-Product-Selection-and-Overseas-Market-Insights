@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AgentFlowTimeline, AGENT_STEP_LABELS } from "../../../../components/agent-flow";
+import { AgentFlowTimeline, AGENT_NODE_LABELS, AGENT_STEP_LABELS } from "../../../../components/agent-flow";
 import { EmptyState } from "../../../_components/EmptyState";
 import { ErrorState } from "../../../_components/ErrorState";
 import { FallbackNotice } from "../../../_components/FallbackNotice";
@@ -449,7 +449,7 @@ export function AnalysisRunWorkspace() {
                           {draft.product_name_cn || draft.product_name_en || `草稿 #${draft.id}`}
                         </span>
                         <span className="mt-1 block text-xs text-slate-500">
-                          来源 {draft.source_platform || "unknown"} · 置信度 {draft.confidence_score ?? "未记录"}
+                          来源 {draft.source_platform || "未知"} · 置信度 {draft.confidence_score ?? "未记录"}
                           {draft.low_confidence ? " · 低置信度" : ""}
                         </span>
                       </button>
@@ -548,7 +548,7 @@ export function AnalysisRunWorkspace() {
             <DetailItem label="企业" value={selectedCompany?.name ?? "-"} />
             <DetailItem label="产品" value={selectedProductsLabel(selectedProducts)} />
             <DetailItem label="目标国家" value={parseCountries(countryInput).join(", ") || "-"} />
-            <DetailItem label="整体状态" value={analysisStatus?.status ?? "waiting"} />
+            <DetailItem label="整体状态" value={workflowStatusLabel(analysisStatus?.status ?? "waiting")} />
           </div>
           {notice ? (
             <p className="mt-4 rounded-lg border border-jade/30 bg-jade/10 p-4 text-sm font-medium leading-6 text-jade">
@@ -573,7 +573,7 @@ export function AnalysisRunWorkspace() {
               <DetailItem label="评分条目" value={String(analysisStatus.scoring_summary.item_count)} />
               <DetailItem label="最高分" value={formatScore(analysisStatus.scoring_summary.top_score)} />
               <DetailItem label="推荐国家" value={analysisStatus.scoring_summary.top_country ?? "-"} />
-              <DetailItem label="数据源" value={analysisStatus.used_providers.join(", ") || "csv_fallback"} />
+              <DetailItem label="数据源" value={analysisStatus.used_providers.join(", ") || "CSV 兜底"} />
             </div>
             {terminal && analysisStatus.status !== "failed" ? (
               <div className="mt-4 flex flex-wrap gap-2">
@@ -605,7 +605,7 @@ export function AnalysisRunWorkspace() {
               <p className="mt-1 text-xs text-slate-500">每 {POLL_INTERVAL_MS / 1000} 秒读取一次状态，完成后停留在本页供评委选择下一步。</p>
             </div>
             <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ${overallStatusClassName(analysisStatus?.status ?? "waiting")}`}>
-              {analysisStatus?.status ?? "waiting"}
+              {workflowStatusLabel(analysisStatus?.status ?? "waiting")}
             </span>
           </div>
           <AgentFlowTimeline currentStepId={analysisStatus?.current_step} steps={timelineSteps} />
@@ -616,8 +616,8 @@ export function AnalysisRunWorkspace() {
         {fallbackUsed ? (
           <FallbackNotice
             source="sample"
-            title="fallback_used 不是失败"
-            description="该步骤使用公开 API 缓存、CSV 样本或确定性 AI 模板保障演示稳定。完成态 fallback_used 表示流程已产出结果，需要在正式投放前复核实时证据。"
+            title="使用兜底不是失败"
+            description="该步骤使用公开 API 缓存、CSV 样本或确定性 AI 模板保障演示稳定。完成态使用兜底表示流程已产出结果，需要在正式投放前复核实时证据。"
           />
         ) : null}
 
@@ -685,18 +685,7 @@ function buildInitialSteps(): AnalysisStepLog[] {
 }
 
 function stepIdToNode(stepId: string): string {
-  const nodes: Record<string, string> = {
-    "01_company_profiling": "CompanyProfilingAgent",
-    "02_product_understanding": "ProductUnderstandingAgent",
-    "03_data_collection": "DataCollectionAgent",
-    "04_competitor_analysis": "CompetitorAnalysisAgent",
-    "05_market_profiling": "MarketProfilingAgent",
-    "06_content_trend": "ContentTrendAgent",
-    "07_opportunity_scoring": "OpportunityScoringAgent",
-    "08_marketing_prep": "MarketingPrepAgent",
-    "09_report_prep": "ReportPrepAgent",
-  };
-  return nodes[stepId] ?? "WorkflowAgent";
+  return AGENT_NODE_LABELS[stepId] ?? "工作流智能体";
 }
 
 function buildEvidenceCards(status: AnalysisStatusResponse | null): EvidenceCard[] {
@@ -754,14 +743,14 @@ function buildEvidenceCards(status: AnalysisStatusResponse | null): EvidenceCard
     },
     {
       key: "csv",
-      title: "CSV fallback",
+      title: "CSV 兜底",
       status: csvLabels.size > 0 ? "已启用兜底" : "可用兜底",
       detail: csvLabels.size > 0 ? summarizeLabels(csvLabels) : "现场网络或平台 API 不稳定时，内置 seed CSV 会保障评分、看板和报告继续产出。",
       tone: "csv",
     },
     {
       key: "ai",
-      title: "AI fallback",
+      title: "AI 兜底",
       status: aiLabels.size > 0 ? "已使用模板兜底" : "模型优先，模板兜底",
       detail: aiLabels.size > 0 ? summarizeLabels(aiLabels) : "qwen3.6-plus 不可用时，后端使用确定性模板生成解释、营销草稿或报告结构。",
       tone: "ai",
@@ -834,6 +823,17 @@ function overallStatusClassName(status: AnalysisWorkflowStatus): string {
     fallback_used: "bg-wheat/15 text-ink ring-wheat/30",
   };
   return classNames[status];
+}
+
+function workflowStatusLabel(status: AnalysisWorkflowStatus): string {
+  const labels: Record<AnalysisWorkflowStatus, string> = {
+    waiting: "等待中",
+    running: "运行中",
+    success: "已完成",
+    failed: "失败",
+    fallback_used: "使用兜底",
+  };
+  return labels[status];
 }
 
 function evidenceCardClassName(tone: EvidenceCard["tone"]): string {

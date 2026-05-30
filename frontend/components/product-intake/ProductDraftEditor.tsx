@@ -51,6 +51,14 @@ const EVIDENCE_SOURCES: ProductIntakeEvidenceSource[] = [
   "model_inference",
 ];
 
+const EVIDENCE_SOURCE_LABELS: Record<ProductIntakeEvidenceSource, string> = {
+  screenshot_text: "截图文本",
+  screenshot_visual: "截图视觉",
+  url_text: "链接文本",
+  manual_text: "手动文本",
+  model_inference: "模型推断",
+};
+
 export function ProductDraftEditor({
   draft,
   onDraftChange,
@@ -265,7 +273,7 @@ export function ProductDraftEditor({
 
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="text-base font-semibold text-ink">evidence</h3>
+            <h3 className="text-base font-semibold text-ink">证据</h3>
             <button
               className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
               disabled={!editable}
@@ -299,7 +307,7 @@ export function ProductDraftEditor({
                     >
                       {EVIDENCE_SOURCES.map((source) => (
                         <option key={source} value={source}>
-                          {source}
+                          {EVIDENCE_SOURCE_LABELS[source]}
                         </option>
                       ))}
                     </select>

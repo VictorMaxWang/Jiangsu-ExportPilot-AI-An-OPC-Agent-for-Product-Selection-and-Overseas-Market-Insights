@@ -80,7 +80,7 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      setError("Clipboard copy failed. Select the Markdown manually and copy it.");
+      setError("复制到剪贴板失败，请手动选择 Markdown 内容复制。");
     }
   }
 
@@ -112,11 +112,14 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
     return (
       <div>
         <PageHeader
-          eyebrow="Export report"
-          title={`Report #${reportId}`}
-          description="Loading generated report content and dashboard context."
+          eyebrow="出海报告"
+          eyebrowEn="Export Report"
+          title={`报告 #${reportId}`}
+          titleEn={`Report #${reportId}`}
+          description="正在加载已生成的报告内容和看板上下文。"
+          descriptionEn="Loading generated report content and dashboard context."
         />
-        <LoadingState label="Loading report" rows={8} />
+        <LoadingState label="正在加载报告" rows={8} />
       </div>
     );
   }
@@ -125,9 +128,12 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
     return (
       <div>
         <PageHeader
-          eyebrow="Export report"
-          title={`Report #${reportId}`}
-          description="The report viewer reads persisted report content only."
+          eyebrow="出海报告"
+          eyebrowEn="Export Report"
+          title={`报告 #${reportId}`}
+          titleEn={`Report #${reportId}`}
+          description="报告详情页只读取已保存的报告内容。"
+          descriptionEn="The report viewer reads persisted report content only."
         />
         <ErrorState message={error} />
       </div>
@@ -137,11 +143,11 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
   if (!report) {
     return (
       <EmptyState
-        title="Report not found"
-        description="Open an existing report from the reports list."
+        title="未找到报告"
+        description="请从报告列表打开一个已存在的报告。"
         action={
           <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/reports">
-            Back to reports
+            返回报告列表
           </Link>
         }
       />
@@ -152,19 +158,21 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
     <div>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <PageHeader
-          eyebrow="Export report"
+          eyebrow="出海报告"
+          eyebrowEn="Export Report"
           title={report.title}
-          description={`Report #${report.id} · Analysis #${report.analysis_id}`}
+          description={`报告 #${report.id} · 分析 #${report.analysis_id}`}
+          descriptionEn={`Report #${report.id} · Analysis #${report.analysis_id}`}
         />
         <div className="flex shrink-0 flex-wrap gap-2">
           <Link className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700" href={`/reports?analysis_id=${report.analysis_id}`}>
-            Back to list
+            返回列表
           </Link>
           <Link className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700" href={`/dashboard/${report.analysis_id}`}>
-            Back to dashboard
+            返回看板
           </Link>
           <button className="rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300" disabled={!report.content_markdown} type="button" onClick={() => void copyMarkdown()}>
-            {copied ? "Copied" : "Copy Markdown"}
+            {copied ? "已复制" : "复制 Markdown"}
           </button>
           <button
             className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
@@ -172,7 +180,7 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
             type="button"
             onClick={() => void regenerateReport()}
           >
-            {regenerating ? "Regenerating" : "重新生成报告"}
+            {regenerating ? "重新生成中" : "重新生成报告"}
           </button>
           <button className="cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-400" disabled type="button">
             PDF 导出将在部署版开启；当前支持 Markdown/HTML 报告。
@@ -181,10 +189,10 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
       </div>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Top country" value={dashboard?.country_scores[0]?.country ?? "-"} helperText="From dashboard aggregation" />
-        <MetricCard label="Top score" value={formatScore(dashboard?.top_recommendations[0]?.total_score)} helperText="Backend scoring result" />
-        <MetricCard label="Sources" value={dashboard?.data_sources_used.length ?? "-"} helperText="API, sample, and fallback labels" />
-        <MetricCard label="PDF" value={report.pdf_url ? "Ready" : "部署版开启"} helperText="PDF 导出将在部署版开启；当前支持 Markdown/HTML 报告。" />
+        <MetricCard label="最高推荐国家" value={dashboard?.country_scores[0]?.country ?? "-"} helperText="来自看板聚合结果" />
+        <MetricCard label="最高分" value={formatScore(dashboard?.top_recommendations[0]?.total_score)} helperText="后端评分结果" />
+        <MetricCard label="来源数" value={dashboard?.data_sources_used.length ?? "-"} helperText="API、样本与兜底标签" />
+        <MetricCard label="PDF" value={report.pdf_url ? "已就绪" : "部署版开启"} helperText="PDF 导出将在部署版开启；当前支持 Markdown/HTML 报告。" />
       </div>
 
       {notice ? <p className="mt-5 rounded-lg border border-jade/30 bg-jade/10 p-4 text-sm font-medium text-jade">{notice}</p> : null}
@@ -192,14 +200,14 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
       <div className="mt-5 grid gap-4">
         <FallbackNotice
           source="sample"
-          title="Evidence boundary"
-          description="The report is based on structured analysis results. Competitor samples do not represent real sales."
+          title="报告证据边界"
+          description="报告基于结构化分析结果。竞品样本不代表真实销量。"
         />
         {fallbackUsed ? (
           <FallbackNotice
             source="csv"
-            title="Fallback evidence included"
-            description="Review live data before production launch decisions."
+            title="包含兜底证据"
+            description="做正式投放决策前，请复核实时平台数据。"
           />
         ) : null}
       </div>
@@ -210,7 +218,7 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
         ) : report.content_markdown ? (
           <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-slate-700">{report.content_markdown}</pre>
         ) : (
-          <EmptyState title="Report content is empty" description="Regenerate this report from the report list." />
+          <EmptyState title="报告内容为空" description="请从报告列表重新生成该报告。" />
         )}
       </section>
     </div>

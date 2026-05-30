@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { navigationItems } from "../_lib/navigation";
+import { LanguageToggle } from "./LanguageToggle";
+import { useI18n } from "./LanguageProvider";
 
 type AppShellProps = {
   children: ReactNode;
@@ -11,6 +13,7 @@ type AppShellProps = {
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
+  const { text } = useI18n();
 
   return (
     <div className="min-h-screen">
@@ -22,33 +25,39 @@ export function AppShell({ children }: AppShellProps) {
             </span>
             <span className="min-w-0">
               <span className="block truncate text-lg font-semibold text-ink">
-                苏品智航 / Jiangsu ExportPilot
+                {text("苏品智航", "Jiangsu ExportPilot")}
               </span>
               <span className="block truncate text-sm text-slate-500">
-                面向江苏制造企业出海的 AI 选品与海外市场洞察智能体
+                {text(
+                  "面向江苏制造企业出海的 AI 选品与海外市场洞察智能体",
+                  "AI product selection and overseas market insights for Jiangsu manufacturers",
+                )}
               </span>
             </span>
           </Link>
-          <nav aria-label="Primary navigation" className="flex flex-wrap gap-1.5">
-            {navigationItems.map((item) => {
-              const isActive =
-                item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+            <nav aria-label="Primary navigation" className="flex flex-wrap gap-1.5">
+              {navigationItems.map((item) => {
+                const isActive =
+                  item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`rounded-md px-2.5 py-2 text-sm font-medium transition sm:px-3 ${
-                    isActive
-                      ? "bg-river text-white shadow-sm"
-                      : "text-slate-600 hover:bg-slate-100 hover:text-ink"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`rounded-md px-2.5 py-2 text-sm font-medium transition sm:px-3 ${
+                      isActive
+                        ? "bg-river text-white shadow-sm"
+                        : "text-slate-600 hover:bg-slate-100 hover:text-ink"
+                    }`}
+                  >
+                    {text(item.labelZh, item.labelEn)}
+                  </Link>
+                );
+              })}
+            </nav>
+            <LanguageToggle />
+          </div>
         </div>
       </header>
       <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>

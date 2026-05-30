@@ -78,7 +78,7 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
     event.preventDefault();
     const parsed = parseAnalysisId(analysisIdInput);
     if (analysisIdInput.trim() && !parsed) {
-      setError("Enter a valid positive analysis id.");
+      setError("请输入有效的正整数分析 ID。");
       return;
     }
     setActiveAnalysisId(parsed);
@@ -86,7 +86,7 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
 
   async function handleGenerate(forceRegenerate: boolean) {
     if (!activeAnalysisId) {
-      setError("Enter an analysis id before generating a report.");
+      setError("生成报告前请先输入分析 ID。");
       return;
     }
     setGenerating(true);
@@ -97,7 +97,7 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
         analysis_id: activeAnalysisId,
         force_regenerate: forceRegenerate,
       });
-      setNotice(forceRegenerate ? "Report regenerated." : "Report generated.");
+      setNotice(forceRegenerate ? "报告已重新生成。" : "报告已生成。");
       await loadReports(activeAnalysisId);
       setCopiedReportId(null);
       if (!reports.some((item) => item.id === report.id)) {
@@ -116,7 +116,7 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
       setCopiedReportId(report.id);
       window.setTimeout(() => setCopiedReportId((current) => (current === report.id ? null : current)), 2000);
     } catch {
-      setError("Clipboard copy failed. Open the report and select the Markdown manually.");
+      setError("复制到剪贴板失败，请打开报告并手动选择 Markdown 复制。");
     }
   }
 
@@ -124,18 +124,21 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
     <div>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <PageHeader
-          eyebrow="Export deliverables"
-          title="Reports"
-          description="Generate and review structured overseas product-selection reports with data-source notes, scoring context, marketing drafts, and risk limits."
+          eyebrow="出海交付物"
+          eyebrowEn="Export Deliverables"
+          title="报告"
+          titleEn="Reports"
+          description="生成和复核结构化出海选品报告，包含数据源说明、评分上下文、营销草稿和风险边界。"
+          descriptionEn="Generate and review structured overseas product-selection reports with data-source notes, scoring context, marketing drafts, and risk limits."
         />
         <div className="flex shrink-0 flex-wrap gap-2">
           {activeAnalysisId ? (
             <Link className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700" href={`/dashboard/${activeAnalysisId}`}>
-              Back to dashboard
+              返回看板
             </Link>
           ) : null}
           <Link className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700" href="/analysis/run">
-            Run analysis
+            运行分析
           </Link>
         </div>
       </div>
@@ -143,16 +146,16 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
       <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_auto]">
         <form className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-panel sm:grid-cols-[1fr_auto]" onSubmit={handleFilterSubmit}>
           <label className="grid gap-2">
-            <span className="text-sm font-medium text-slate-700">Analysis ID</span>
+            <span className="text-sm font-medium text-slate-700">分析 ID</span>
             <input
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
-              placeholder="Optional, for example 1"
+              placeholder="可选，例如 1"
               value={analysisIdInput}
               onChange={(event) => setAnalysisIdInput(event.target.value)}
             />
           </label>
           <button className="self-end rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white" type="submit">
-            Load reports
+            加载报告
           </button>
         </form>
         <div className="flex flex-wrap items-end gap-2">
@@ -162,7 +165,7 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
             type="button"
             onClick={() => void handleGenerate(false)}
           >
-            {generating ? "Generating" : "Generate"}
+            {generating ? "生成中" : "生成"}
           </button>
           <button
             className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
@@ -170,29 +173,29 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
             type="button"
             onClick={() => void handleGenerate(true)}
           >
-            Regenerate
+            重新生成
           </button>
         </div>
       </div>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Reports" value={total} helperText={activeAnalysisId ? `Analysis #${activeAnalysisId}` : "All reports"} />
-        <MetricCard label="Top country" value={dashboard?.country_scores[0]?.country ?? "-"} helperText="From dashboard aggregation" />
-        <MetricCard label="Top score" value={formatScore(dashboard?.top_recommendations[0]?.total_score)} helperText="Backend scoring result" />
-        <MetricCard label="Sources" value={dashboard?.data_sources_used.length ?? "-"} helperText="API, sample, and fallback labels" />
+        <MetricCard label="报告数" value={total} helperText={activeAnalysisId ? `分析 #${activeAnalysisId}` : "全部报告"} />
+        <MetricCard label="最高推荐国家" value={dashboard?.country_scores[0]?.country ?? "-"} helperText="来自看板聚合结果" />
+        <MetricCard label="最高分" value={formatScore(dashboard?.top_recommendations[0]?.total_score)} helperText="后端评分结果" />
+        <MetricCard label="来源数" value={dashboard?.data_sources_used.length ?? "-"} helperText="API、样本与兜底标签" />
       </div>
 
       <div className="mt-5 grid gap-4">
         <FallbackNotice
           source="sample"
-          title="Report evidence boundary"
-          description="Reports are based on structured analysis data only. Platform competitor samples indicate price ranges and content direction; they do not represent real sales."
+          title="报告证据边界"
+          description="报告仅基于结构化分析数据。平台竞品样本只表示价格区间和内容方向，不代表真实销量。"
         />
         {fallbackUsed ? (
           <FallbackNotice
             source="csv"
-            title="Fallback evidence included"
-            description="Some provider or AI steps used fallback data. Review live marketplace evidence before publishing listings or investment decisions."
+            title="包含兜底证据"
+            description="部分数据源或 AI 步骤使用了兜底数据。发布商品或做投资决策前，请复核实时平台证据。"
           />
         ) : null}
         {notice ? <p className="rounded-lg border border-jade/30 bg-jade/10 p-4 text-sm font-medium text-jade">{notice}</p> : null}
@@ -201,19 +204,19 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
 
       <section className="mt-5 rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-ink">Report list</h2>
+          <h2 className="text-lg font-semibold text-ink">报告列表</h2>
           {activeAnalysisId ? <span className="text-sm text-slate-500">当前仅显示 analysis_id = {activeAnalysisId} 的报告</span> : null}
         </div>
         <div className="mt-4">
           {loading ? (
-            <LoadingState label="Loading reports" rows={5} />
+            <LoadingState label="正在加载报告" rows={5} />
           ) : reports.length === 0 ? (
             <EmptyState
-              title="No reports found"
-              description={activeAnalysisId ? "Generate a report for this analysis or wait for the analysis workflow to finish." : "Enter an analysis id or run an analysis to create reports."}
+              title="暂无报告"
+              description={activeAnalysisId ? "可为该分析生成报告，或等待分析工作流完成。" : "请输入分析 ID，或运行一次分析来创建报告。"}
               action={
                 <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/analysis/run">
-                  Run analysis
+                  运行分析
                 </Link>
               }
             />
@@ -242,25 +245,25 @@ function ReportCard({ report, copied, onCopy }: { report: Report; copied: boolea
         <div className="min-w-0">
           <h3 className="text-base font-semibold text-ink">{report.title}</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Report #{report.id} · Analysis #{report.analysis_id} · {formatDate(report.created_at)}
+            报告 #{report.id} · 分析 #{report.analysis_id} · {formatDate(report.created_at)}
           </p>
           <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
-            <span className="rounded-md bg-white px-2 py-1 text-slate-600">Markdown {report.content_markdown ? "ready" : "missing"}</span>
-            <span className="rounded-md bg-white px-2 py-1 text-slate-600">HTML {report.content_html ? "ready" : "missing"}</span>
+            <span className="rounded-md bg-white px-2 py-1 text-slate-600">Markdown {report.content_markdown ? "已生成" : "缺失"}</span>
+            <span className="rounded-md bg-white px-2 py-1 text-slate-600">HTML {report.content_html ? "已生成" : "缺失"}</span>
             <span className="rounded-md bg-white px-2 py-1 text-slate-600">
-              PDF {report.pdf_url ? "ready" : "部署版开启"}
+              PDF {report.pdf_url ? "已就绪" : "部署版开启"}
             </span>
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <Link className="rounded-md bg-river px-3 py-2 text-sm font-semibold text-white" href={`/reports/${report.id}`}>
-            View
+            查看
           </Link>
           <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700" type="button" onClick={onCopy}>
-            {copied ? "Copied" : "Copy Markdown"}
+            {copied ? "已复制" : "复制 Markdown"}
           </button>
           <Link className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700" href={`/dashboard/${report.analysis_id}`}>
-            Dashboard
+            看板
           </Link>
           <button className="cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-400" disabled type="button">
             PDF 导出将在部署版开启；当前支持 Markdown/HTML 报告。

@@ -16,9 +16,12 @@ export default function ProductsPage({ searchParams }: ProductsPageProps) {
   return (
     <div>
       <PageHeader
-        eyebrow="产品库 / Product Catalog"
-        title="产品 / Products"
+        eyebrow="产品库"
+        eyebrowEn="Product Catalog"
+        title="产品"
+        titleEn="Products"
         description="管理候选产品，分析时结合已支持数据源与 CSV 兜底生成市场机会评分。"
+        descriptionEn="Manage candidate products for opportunity scoring with supported data sources and CSV fallback."
       />
       <div className="mb-5">
         <Link

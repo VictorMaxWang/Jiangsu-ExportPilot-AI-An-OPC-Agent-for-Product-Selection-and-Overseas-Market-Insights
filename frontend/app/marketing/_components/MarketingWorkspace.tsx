@@ -62,7 +62,7 @@ export function MarketingWorkspace() {
   const loadAnalysisById = useCallback(async (rawId: string) => {
     const analysisId = Number(rawId);
     if (!Number.isInteger(analysisId) || analysisId < 1) {
-      setError("Enter a valid analysis id.");
+      setError("请输入有效的分析 ID。");
       return;
     }
 
@@ -83,13 +83,13 @@ export function MarketingWorkspace() {
         setResult(asset ? marketingResultFromAsset(asset, nextForm) : null);
         setNotice(
           asset
-            ? `Analysis #${analysisId} 已加载，并自动展示 top recommendation 的随分析营销草稿。`
-            : `Analysis #${analysisId} 已加载，并自动填入 top recommendation。`,
+            ? `分析 #${analysisId} 已加载，并自动展示最高推荐项的随分析营销草稿。`
+            : `分析 #${analysisId} 已加载，并自动填入最高推荐项。`,
         );
       } else {
         setSelectedScoreKey("");
         setResult(null);
-        setNotice(`Analysis #${analysisId} loaded, but no score rows were found.`);
+        setNotice(`分析 #${analysisId} 已加载，但未找到评分行。`);
       }
     } catch (requestError) {
       setAnalysisDetail(null);
@@ -130,7 +130,7 @@ export function MarketingWorkspace() {
       setForm(nextForm);
       setResult(asset ? marketingResultFromAsset(asset, nextForm) : null);
       setAiFallbackNotice(null);
-      setNotice(asset ? "Loaded the saved marketing draft for this analysis row." : "Analysis row loaded into the generator.");
+      setNotice(asset ? "已加载该分析行保存的营销草稿。" : "已将该分析行填入生成器。");
     }
   }
 
@@ -143,11 +143,11 @@ export function MarketingWorkspace() {
 
     const normalizedCountry = form.country.trim().toUpperCase();
     if (!form.product.trim()) {
-      setError("Product is required.");
+      setError("请填写产品。");
       return;
     }
     if (!/^[A-Z]{2,3}$/.test(normalizedCountry)) {
-      setError("Country must be a 2 or 3 letter code, for example US, JP, or GB.");
+      setError("国家必须是 2 或 3 位代码，例如 US、JP 或 GB。");
       return;
     }
 
@@ -167,7 +167,7 @@ export function MarketingWorkspace() {
       });
       setResult(generated);
       setForm((current) => ({ ...current, country: normalizedCountry }));
-      setNotice(mode === "analysis" ? "Draft generated and saved to the analysis state." : "Draft generated.");
+      setNotice(mode === "analysis" ? "草稿已生成并保存到分析状态。" : "草稿已生成。");
     } catch (requestError) {
       const message = getFriendlyErrorMessage(requestError);
       setAiFallbackNotice(
@@ -185,14 +185,14 @@ export function MarketingWorkspace() {
       setCopiedKey(key);
       window.setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 2000);
     } catch {
-      setCopyError("Clipboard copy failed. Select the text manually and copy it.");
+      setCopyError("复制到剪贴板失败，请手动选择文本复制。");
     }
   }
 
   return (
     <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
       <section className="grid gap-5">
-        <Panel title="Source">
+        <Panel title="来源">
           <div className="grid gap-4">
             <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
               <button
@@ -200,14 +200,14 @@ export function MarketingWorkspace() {
                 type="button"
                 onClick={() => setMode("analysis")}
               >
-                Analysis result
+                分析结果
               </button>
               <button
                 className={`rounded-md px-3 py-2 text-sm font-semibold ${mode === "manual" ? "bg-white text-river shadow-sm" : "text-slate-600"}`}
                 type="button"
                 onClick={() => setMode("manual")}
               >
-                Manual input
+                手动输入
               </button>
             </div>
 
@@ -215,7 +215,7 @@ export function MarketingWorkspace() {
               <div className="grid gap-4">
                 <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
                   <TextInput
-                    label="Analysis ID"
+                    label="分析 ID"
                     value={analysisIdInput}
                     onChange={setAnalysisIdInput}
                   />
@@ -225,13 +225,13 @@ export function MarketingWorkspace() {
                     type="button"
                     onClick={() => void loadAnalysisById(analysisIdInput)}
                   >
-                    {loadingAnalysis ? "Loading" : "Load"}
+                    {loadingAnalysis ? "加载中" : "加载"}
                   </button>
                 </div>
-                {loadingAnalysis ? <LoadingState label="Loading analysis context" rows={3} /> : null}
+                {loadingAnalysis ? <LoadingState label="正在加载分析上下文" rows={3} /> : null}
                 {analysisDetail && analysisDetail.scores.length > 0 ? (
                   <label className="grid gap-2">
-                    <span className="text-sm font-medium text-slate-700">Product-country row</span>
+                    <span className="text-sm font-medium text-slate-700">产品-国家评分行</span>
                     <select
                       className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
                       value={selectedScoreKey}
@@ -251,23 +251,23 @@ export function MarketingWorkspace() {
           </div>
         </Panel>
 
-        <Panel title="Generator input">
+        <Panel title="生成输入">
           <form className="grid gap-4" onSubmit={handleSubmit}>
-            <TextInput label="Product" required value={form.product} onChange={(value) => setForm({ ...form, product: value })} />
+            <TextInput label="产品" required value={form.product} onChange={(value) => setForm({ ...form, product: value })} />
             <div className="grid gap-4 sm:grid-cols-2">
-              <TextInput label="Country" required value={form.country} onChange={(value) => setForm({ ...form, country: value })} />
-              <TextInput label="Price range" value={form.priceRange} onChange={(value) => setForm({ ...form, priceRange: value })} />
+              <TextInput label="国家" required value={form.country} onChange={(value) => setForm({ ...form, country: value })} />
+              <TextInput label="价格区间" value={form.priceRange} onChange={(value) => setForm({ ...form, priceRange: value })} />
             </div>
-            <TextArea label="Target users" value={form.targetUsers} onChange={(value) => setForm({ ...form, targetUsers: value })} />
-            <TextArea label="Selling points" value={form.sellingPoints} onChange={(value) => setForm({ ...form, sellingPoints: value })} />
-            <TextArea label="Content themes" value={form.contentThemes} onChange={(value) => setForm({ ...form, contentThemes: value })} />
-            <TextArea label="Risk notes" value={form.riskNotes} onChange={(value) => setForm({ ...form, riskNotes: value })} />
+            <TextArea label="目标用户" value={form.targetUsers} onChange={(value) => setForm({ ...form, targetUsers: value })} />
+            <TextArea label="卖点" value={form.sellingPoints} onChange={(value) => setForm({ ...form, sellingPoints: value })} />
+            <TextArea label="内容主题" value={form.contentThemes} onChange={(value) => setForm({ ...form, contentThemes: value })} />
+            <TextArea label="风险提示" value={form.riskNotes} onChange={(value) => setForm({ ...form, riskNotes: value })} />
             <button
               className="rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
               disabled={generating || !form.product.trim() || !form.country.trim()}
               type="submit"
             >
-              {generating ? "Generating" : "Generate marketing content"}
+              {generating ? "生成中" : "生成营销文案"}
             </button>
           </form>
         </Panel>
@@ -284,9 +284,9 @@ export function MarketingWorkspace() {
       </section>
 
       <section className="grid gap-5">
-        <Panel title="Generated draft">
+        <Panel title="生成草稿">
           {generating ? (
-            <LoadingState label="Calling qwen3.6-plus" rows={5} />
+            <LoadingState label="正在调用 qwen3.6-plus" rows={5} />
           ) : result ? (
             <div className="grid gap-4">
               <div className="flex flex-wrap justify-end gap-2">
@@ -295,7 +295,7 @@ export function MarketingWorkspace() {
                   type="button"
                   onClick={() => void copyText("all", formatAll(result))}
                 >
-                  {copiedKey === "all" ? "Copied" : "Copy all"}
+                  {copiedKey === "all" ? "已复制" : "复制全部"}
                 </button>
               </div>
               {outputSections.map((section) => (
@@ -306,16 +306,16 @@ export function MarketingWorkspace() {
                   onCopy={() => void copyText(section.key, section.text)}
                 />
               ))}
-              {copyError ? <ErrorState title="Clipboard" message={copyError} /> : null}
+              {copyError ? <ErrorState title="剪贴板" message={copyError} /> : null}
             </div>
           ) : (
-            <EmptyState title="No draft yet" description="Generate content from an analysis row or manual product input." />
+            <EmptyState title="暂无草稿" description="可从分析评分行或手动产品信息生成内容。" />
           )}
         </Panel>
         <FallbackNotice
           source="sample"
-          title="Draft for review"
-          description="The generated copy should be reviewed against platform policies, claim evidence, and sample data limitations before publishing."
+          title="发布前需复核"
+          description="生成文案发布前应结合平台政策、宣称证据和样本数据边界进行人工复核。"
         />
       </section>
     </div>
@@ -395,7 +395,7 @@ function OutputBlock({
           type="button"
           onClick={onCopy}
         >
-          {copied ? "Copied" : "Copy"}
+          {copied ? "已复制" : "复制"}
         </button>
       </div>
       <pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-700">{section.text}</pre>
@@ -470,8 +470,8 @@ function formFromScore(score: AnalysisScoreItem, detail: AnalysisDetailResponse)
   ].filter(Boolean);
   const riskNotes = [
     score.risk,
-    evidenceFlag(score.evidence, "content_fallback_used", "Content evidence used fallback or sample data."),
-    evidenceFlag(score.evidence, "competitor_fallback_used", "Competitor evidence used fallback or sample data."),
+    evidenceFlag(score.evidence, "content_fallback_used", "内容证据使用了兜底或样本数据。"),
+    evidenceFlag(score.evidence, "competitor_fallback_used", "竞品证据使用了兜底或样本数据。"),
   ].filter(Boolean);
 
   return {
@@ -498,13 +498,13 @@ function matchingTrend(score: AnalysisScoreItem, detail: AnalysisDetailResponse)
 
 function buildOutputSections(result: MarketingGenerateResponse): OutputSection[] {
   return [
-    { key: "title", title: "English title", text: result.title },
-    { key: "bullets", title: "Five bullet points", text: result.bullet_points.map((item) => `- ${item}`).join("\n") },
-    { key: "seo", title: "SEO keywords", text: result.seo_keywords.join(", ") },
-    { key: "video", title: "Short video script", text: result.short_video_script },
-    { key: "pinterest", title: "Pinterest image keywords", text: result.pinterest_keywords.join(", ") },
-    { key: "listing", title: "Platform listing advice", text: result.platform_listing_advice },
-    { key: "risk", title: "Risk notes", text: result.risk_notes.map((item) => `- ${item}`).join("\n") },
+    { key: "title", title: "英文标题", text: result.title },
+    { key: "bullets", title: "五点卖点", text: result.bullet_points.map((item) => `- ${item}`).join("\n") },
+    { key: "seo", title: "SEO 关键词", text: result.seo_keywords.join(", ") },
+    { key: "video", title: "短视频脚本", text: result.short_video_script },
+    { key: "pinterest", title: "Pinterest 图片关键词", text: result.pinterest_keywords.join(", ") },
+    { key: "listing", title: "平台上架建议", text: result.platform_listing_advice },
+    { key: "risk", title: "风险提示", text: result.risk_notes.map((item) => `- ${item}`).join("\n") },
   ];
 }
 
