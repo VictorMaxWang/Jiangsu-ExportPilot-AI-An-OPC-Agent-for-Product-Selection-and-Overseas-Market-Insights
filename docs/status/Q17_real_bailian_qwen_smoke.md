@@ -80,6 +80,14 @@
 - Follow-up：生产部署后复测 `GET /api/ai/status`、`POST /api/ai/smoke/text`、`POST /api/ai/smoke/vision`。
 - Follow-up：如需 vision smoke 成功，生产后端必须启用视觉功能并配置可用的视觉模型。
 
+## GitHub 发布状态
+
+- Branch：`codex/q17-real-bailian-qwen-smoke`
+- Initial implementation commit：`0b540ccede7728e0496efc31fc5515f8156920d8`
+- Draft PR：`https://github.com/VictorMaxWang/Jiangsu-ExportPilot-AI-An-OPC-Agent-for-Product-Selection-and-Overseas-Market-Insights/pull/2`
+- PR 状态：open draft，mergeable；PR checks 当前为空。
+- Actions 状态：该分支有一条 push 运行 `26674361403`，0 秒失败且 `jobs=[]`、无可用日志；本地验收命令均已通过。
+
 ## Continuation Audit
 
 - 2026-05-30 11:09:20 +08:00 复查当前工作树：`cd frontend && npm run lint` 通过；`cd frontend && npm run build` 通过。
@@ -93,3 +101,4 @@
 - 2026-05-30 11:16:48 +08:00 再次复查生产：`GET https://opc.ankangyu.cn/health` 为 HTTP 200；`GET https://opc.ankangyu.cn/api/ai/status` 仍为 HTTP 404，未触发生产 smoke。
 - 2026-05-30 11:18:50 +08:00 再次复查生产：`GET https://opc.ankangyu.cn/health` 为 HTTP 200；`GET https://opc.ankangyu.cn/api/ai/status` 仍为 HTTP 404，未触发生产 smoke。
 - 2026-05-30 11:23:31 +08:00 安全收敛后复跑：Bailian 真实调用凭据读取限定为 `DASHSCOPE_API_KEY`；`cd backend && py -3.11 -m pytest tests -q` 通过，270 passed；`cd frontend && npm run lint` 通过；`cd frontend && npm run build` 通过。
+- 2026-05-30 12:26:36 +08:00 GitHub 发布后复查：PR #2 已创建并推送；`GET https://opc.ankangyu.cn/health` 为 HTTP 200；`GET https://opc.ankangyu.cn/api/ai/status` 仍为 HTTP 404，生产 smoke 仍需部署后触发。
