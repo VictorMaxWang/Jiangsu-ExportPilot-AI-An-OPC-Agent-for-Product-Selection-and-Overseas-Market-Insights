@@ -343,6 +343,11 @@ class ProductUrlIntakeResponse(BaseModel):
     job_id: int
     draft_id: int
     status: Literal["draft_ready", "needs_screenshot", "failed"]
+    parse_status: str
+    source_platform: str
+    normalized_url: str | None = None
+    item_id: str | None = None
+    sku_id: str | None = None
     message: str
     ai_result_type: AiResultType
     ai_fallback_used: bool

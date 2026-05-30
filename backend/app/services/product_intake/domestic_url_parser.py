@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 DomesticPlatform = Literal["taobao", "tmall", "jd", "pinduoduo", "unknown"]
 DomesticUrlParseStatus = Literal[
     "parsed",
+    "shortlink",
     "invalid_url",
     "invalid_scheme",
     "blocked_host",
@@ -18,6 +19,7 @@ DomesticUrlParseStatus = Literal[
 ]
 
 ALLOWED_DOMAINS = ("taobao.com", "tmall.com", "jd.com", "pinduoduo.com", "yangkeduo.com")
+SHORTLINK_PLATFORMS: dict[str, DomesticPlatform] = {"e.tb.cn": "taobao", "3.cn": "jd"}
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 JD_SKU_PATH_RE = re.compile(r"/(?:product/)?([0-9]{5,})\.html/?$")
 PDD_PATH_RE = re.compile(r"/(?:goods|goods1|duo_goods)/([A-Za-z0-9_-]{3,128})(?:/|$)")
@@ -65,6 +67,15 @@ def parse_domestic_product_url(raw_url: str) -> DomesticUrlParseResult:
     if port not in {None, 80, 443}:
         return _result(original_url, parse_status="blocked_host")
 
+    shortlink_platform = detect_shortlink_platform(host)
+    if shortlink_platform != "unknown":
+        return _result(
+            original_url,
+            platform=shortlink_platform,
+            normalized_url=build_canonical_input_url(parsed.scheme, host, parsed.path, parsed.query, port),
+            parse_status="shortlink",
+        )
+
     platform = detect_platform(host)
     if platform == "unknown":
         return _result(original_url, parse_status="unsupported_domain")
@@ -95,7 +106,13 @@ def normalize_host(hostname: str | None) -> str:
 
 def is_supported_domestic_host(hostname: str) -> bool:
     host = normalize_host(hostname)
+    if host in SHORTLINK_PLATFORMS:
+        return True
     return any(host == domain or host.endswith(f".{domain}") for domain in ALLOWED_DOMAINS)
+
+
+def detect_shortlink_platform(hostname: str) -> DomesticPlatform:
+    return SHORTLINK_PLATFORMS.get(normalize_host(hostname), "unknown")
 
 
 def detect_platform(hostname: str) -> DomesticPlatform:
@@ -161,6 +178,13 @@ def build_normalized_url(platform: DomesticPlatform, *, item_id: str, sku_id: st
     if platform == "pinduoduo" and item_id:
         return _with_query("https", "mobile.yangkeduo.com", "/goods.html", {"goods_id": item_id, "sku_id": sku_id})
     return ""
+
+
+def build_canonical_input_url(scheme: str, host: str, path: str, query: str, port: int | None) -> str:
+    normalized_scheme = scheme.lower()
+    default_port = 443 if normalized_scheme == "https" else 80
+    netloc = host if port in {None, default_port} else f"{host}:{port}"
+    return urlunsplit((normalized_scheme, netloc, path or "/", query, ""))
 
 
 def _result(

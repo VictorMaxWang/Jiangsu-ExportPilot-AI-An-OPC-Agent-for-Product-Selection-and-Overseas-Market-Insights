@@ -258,6 +258,11 @@ export type ProductUrlIntakeResponse = {
   job_id: number;
   draft_id: number;
   status: ProductUrlIntakeStatus;
+  parse_status: string;
+  source_platform: string;
+  normalized_url: string | null;
+  item_id: string | null;
+  sku_id: string | null;
   message: string;
   ai_result_type: ProductIntakeAiResultType;
   ai_fallback_used: boolean;

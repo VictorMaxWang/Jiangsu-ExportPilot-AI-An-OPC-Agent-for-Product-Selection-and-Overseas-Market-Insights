@@ -27,7 +27,7 @@ AddressResolver = Callable[[str, int], Awaitable[list[str]] | list[str]]
 SCREENSHOT_MESSAGE = "请上传截图继续分析"
 DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
 DEFAULT_MAX_VISIBLE_TEXT_CHARS = 6000
-DEFAULT_MAX_REDIRECTS = 3
+DEFAULT_MAX_REDIRECTS = 5
 BLOCKED_LITERAL_IPS = {
     ipaddress.ip_address("169.254.169.254"),
     ipaddress.ip_address("100.100.100.200"),
@@ -106,7 +106,7 @@ async def fetch_domestic_product_page(
         return _needs_screenshot("URL_PARSE_FAILED")
 
     current_url = parsed.normalized_url
-    timeout = httpx.Timeout(8.0, connect=3.0, read=5.0, write=3.0, pool=3.0)
+    timeout = httpx.Timeout(10.0, connect=3.0, read=7.0, write=3.0, pool=3.0)
     headers = {
         "Accept": "text/html,application/xhtml+xml",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",

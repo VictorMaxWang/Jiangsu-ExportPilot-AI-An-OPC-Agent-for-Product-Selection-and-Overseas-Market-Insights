@@ -174,6 +174,11 @@ def test_url_intake_qwen_mock_success_creates_job_link_and_draft(
     payload = response.json()
     assert payload["status"] == "draft_ready"
     assert payload["message"] == "draft_ready"
+    assert payload["parse_status"] == "parsed"
+    assert payload["source_platform"] == "jd"
+    assert payload["normalized_url"] == "https://item.jd.com/100012043978.html"
+    assert payload["item_id"] == "100012043978"
+    assert payload["sku_id"] == "100012043978"
     assert payload["ai_result_type"] == "real_qwen"
     assert payload["ai_fallback_used"] is False
     assert payload["model_used"] == "qwen3.6-plus"
@@ -320,6 +325,142 @@ def test_url_missing_item_id_creates_needs_screenshot_draft(
         assert link is not None
         assert link.platform == "taobao"
         assert link.parse_status == "needs_screenshot"
+
+
+def test_url_intake_pinduoduo_goods2_ps_returns_needs_screenshot_without_ai(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_url_env(monkeypatch)
+    fake_ai = FakeTextClient(json.dumps(SUCCESS_PAYLOAD, ensure_ascii=False))
+    fake_fetch = FakePageFetcher(_parsed_fetch_result())
+    app.dependency_overrides[get_bailian_client] = lambda: fake_ai
+    monkeypatch.setattr("app.services.product_intake.url_intake.fetch_domestic_product_page", fake_fetch)
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/url",
+        json={"company_id": company_id, "url": "https://mobile.yangkeduo.com/goods2.html?ps=zheeHWNSNR"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "needs_screenshot"
+    assert payload["parse_status"] == "needs_screenshot"
+    assert payload["source_platform"] == "pinduoduo"
+    assert payload["normalized_url"] is None
+    assert payload["item_id"] is None
+    assert payload["sku_id"] is None
+    assert payload["ai_result_type"] == "manual_required"
+    assert payload["draft"]["low_confidence"] is True
+    assert fake_fetch.calls == []
+    assert fake_ai.calls == []
+    with session_factory() as db:
+        link = db.scalar(select(DomesticProductLink).where(DomesticProductLink.import_job_id == payload["job_id"]))
+        draft = db.get(ProductDraft, payload["draft_id"])
+        assert link is not None and link.platform == "pinduoduo"
+        assert link.parse_status == "needs_screenshot"
+        assert draft is not None and draft.product_name_cn is None
+        assert draft.confidence_score == 0
+
+
+def test_url_intake_shortlink_fetch_failure_returns_structured_needs_screenshot(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_url_env(monkeypatch)
+    fake_ai = FakeTextClient(json.dumps(SUCCESS_PAYLOAD, ensure_ascii=False))
+    fake_fetch = FakePageFetcher(
+        DomesticPageFetchResult(
+            parse_status="needs_screenshot",
+            error_code="URL_FETCH_TIMEOUT",
+            message="请上传截图继续分析",
+            final_url="https://3.cn/-2Q1WvH7?jkl=@X59VX7JUQ1@",
+        )
+    )
+    app.dependency_overrides[get_bailian_client] = lambda: fake_ai
+    monkeypatch.setattr("app.services.product_intake.url_intake.fetch_domestic_product_page", fake_fetch)
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/url",
+        json={"company_id": company_id, "url": "https://3.cn/-2Q1WvH7?jkl=@X59VX7JUQ1@"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "needs_screenshot"
+    assert payload["parse_status"] == "needs_screenshot"
+    assert payload["source_platform"] == "jd"
+    assert payload["normalized_url"] == "https://3.cn/-2Q1WvH7?jkl=@X59VX7JUQ1@"
+    assert payload["item_id"] is None
+    assert payload["sku_id"] is None
+    assert payload["ai_result_type"] == "manual_required"
+    assert payload["error_code"] == "URL_FETCH_TIMEOUT"
+    assert fake_fetch.calls == ["https://3.cn/-2Q1WvH7?jkl=@X59VX7JUQ1@"]
+    assert fake_ai.calls == []
+    with session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ProductImportJob)) == 1
+        link = db.scalar(select(DomesticProductLink))
+        assert link is not None and link.platform == "jd"
+        assert link.parse_status == "needs_screenshot"
+
+
+def test_url_intake_taobao_shortlink_parsed_text_uses_qwen_and_expanded_url(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_url_env(monkeypatch)
+    fake_ai = FakeTextClient(json.dumps({**SUCCESS_PAYLOAD, "source_platform": "taobao"}, ensure_ascii=False))
+    fake_fetch = FakePageFetcher(
+        DomesticPageFetchResult(
+            parse_status="parsed",
+            title="南通家纺100%加厚磨毛四件套 - 淘宝",
+            meta_description="南通家纺100%加厚磨毛四件套纯棉全棉被套床单双人4件套四季通用",
+            og_title="南通家纺100%加厚磨毛四件套",
+            visible_text="南通家纺100%加厚磨毛四件套 纯棉全棉被套床单 双人4件套 四季通用",
+            product_name_candidates=["南通家纺100%加厚磨毛四件套"],
+            http_status=200,
+            final_url="https://item.taobao.com/item.htm?id=729576498123&spm=secret-token",
+            message="parsed",
+        )
+    )
+    app.dependency_overrides[get_bailian_client] = lambda: fake_ai
+    monkeypatch.setattr("app.services.product_intake.url_intake.fetch_domestic_product_page", fake_fetch)
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/url",
+        json={"company_id": company_id, "url": "https://e.tb.cn/h.Rg7IXlmjiRJ5ifv?tk=S71r5yDJd3y"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "draft_ready"
+    assert payload["parse_status"] == "parsed"
+    assert payload["source_platform"] == "taobao"
+    assert payload["normalized_url"] == "https://item.taobao.com/item.htm?id=729576498123"
+    assert payload["item_id"] == "729576498123"
+    assert payload["sku_id"] is None
+    assert payload["ai_result_type"] == "real_qwen"
+    assert payload["model_used"] == "qwen3.6-plus"
+    assert fake_fetch.calls == ["https://e.tb.cn/h.Rg7IXlmjiRJ5ifv?tk=S71r5yDJd3y"]
+    assert len(fake_ai.calls) == 1
+    ai_call_text = json.dumps(fake_ai.calls, ensure_ascii=False)
+    assert "item.taobao.com" in ai_call_text
+    assert "secret-token" not in ai_call_text
+
+    with session_factory() as db:
+        link = db.scalar(select(DomesticProductLink).where(DomesticProductLink.import_job_id == payload["job_id"]))
+        draft = db.get(ProductDraft, payload["draft_id"])
+        assert link is not None and link.platform == "taobao"
+        assert link.normalized_url == "https://item.taobao.com/item.htm?id=729576498123"
+        assert link.item_id == "729576498123"
+        assert link.parse_status == "parsed"
+        assert draft is not None and draft.source_platform == "taobao"
 
 
 def test_url_intake_fetch_failure_falls_back_to_needs_screenshot(

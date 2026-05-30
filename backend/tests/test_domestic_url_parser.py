@@ -37,6 +37,35 @@ def test_jd_url_parser_extracts_sku_id() -> None:
 
 
 @pytest.mark.parametrize(
+    ("url", "expected_platform", "expected_normalized"),
+    [
+        (
+            "https://e.tb.cn/h.Rg7IXlmjiRJ5ifv?tk=S71r5yDJd3y#ignored",
+            "taobao",
+            "https://e.tb.cn/h.Rg7IXlmjiRJ5ifv?tk=S71r5yDJd3y",
+        ),
+        (
+            "https://3.cn/-2Q1WvH7?jkl=@X59VX7JUQ1@",
+            "jd",
+            "https://3.cn/-2Q1WvH7?jkl=@X59VX7JUQ1@",
+        ),
+    ],
+)
+def test_shortlink_domains_are_safe_expansion_candidates(
+    url: str,
+    expected_platform: str,
+    expected_normalized: str,
+) -> None:
+    result = parse_domestic_product_url(url)
+
+    assert result.platform == expected_platform
+    assert result.parse_status == "shortlink"
+    assert result.normalized_url == expected_normalized
+    assert result.item_id == ""
+    assert result.sku_id == ""
+
+
+@pytest.mark.parametrize(
     "url",
     [
         "https://mobile.yangkeduo.com/goods.html?goods_id=1234567890",
@@ -50,6 +79,14 @@ def test_pinduoduo_url_parser_recognizes_goods_id(url: str) -> None:
     assert result.item_id == "1234567890"
     assert result.parse_status == "parsed"
     assert result.normalized_url == "https://mobile.yangkeduo.com/goods.html?goods_id=1234567890"
+
+
+def test_pinduoduo_goods2_ps_link_is_supported_but_needs_item_context() -> None:
+    result = parse_domestic_product_url("https://mobile.yangkeduo.com/goods2.html?ps=zheeHWNSNR")
+
+    assert result.platform == "pinduoduo"
+    assert result.parse_status == "missing_item_id"
+    assert result.normalized_url == ""
 
 
 @pytest.mark.parametrize(
@@ -80,6 +117,7 @@ def test_url_parser_normalizes_uppercase_and_trailing_dot_host() -> None:
     "url",
     [
         "https://item.jd.com:444/100012043978.html",
+        "https://e.tb.cn:444/h.Rg7IXlmjiRJ5ifv?tk=S71r5yDJd3y",
         "https://detail.tmall.com/item.htm?id=abc%2Fdef",
         "https://mobile.yangkeduo.com/goods.html?goods_id=abc%2Fdef",
     ],

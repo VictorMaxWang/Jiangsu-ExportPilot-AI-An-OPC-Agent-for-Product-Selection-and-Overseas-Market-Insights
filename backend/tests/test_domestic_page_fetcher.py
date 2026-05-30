@@ -91,6 +91,34 @@ def test_fetcher_redirect_limit_returns_needs_screenshot() -> None:
     assert result.error_code == "URL_REDIRECT_LIMIT_EXCEEDED"
 
 
+def test_fetcher_follows_shortlink_redirect_to_allowed_product_page() -> None:
+    calls: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        calls.append(url)
+        if url.startswith("https://3.cn/"):
+            return httpx.Response(302, headers={"location": "https://item.jd.com/100012043978.html"})
+        return httpx.Response(200, headers={"content-type": "text/html"}, text=_product_html())
+
+    result = asyncio.run(
+        fetch_domestic_product_page(
+            DomesticPageFetchInput(
+                platform="jd",
+                original_url="https://3.cn/-2Q1WvH7?jkl=@X59VX7JUQ1@",
+                normalized_url="https://3.cn/-2Q1WvH7?jkl=@X59VX7JUQ1@",
+            ),
+            transport=httpx.MockTransport(handler),
+            resolver=lambda _host, _port: ["93.184.216.34"],
+        )
+    )
+
+    assert result.parse_status == "parsed"
+    assert result.final_url == "https://item.jd.com/100012043978.html"
+    assert calls[0].startswith("https://3.cn/-2Q1WvH7?jkl=")
+    assert calls[1] == "https://item.jd.com/100012043978.html"
+
+
 def test_fetcher_sends_no_cookie_or_authorization_headers() -> None:
     seen_headers: dict[str, str] = {}
 

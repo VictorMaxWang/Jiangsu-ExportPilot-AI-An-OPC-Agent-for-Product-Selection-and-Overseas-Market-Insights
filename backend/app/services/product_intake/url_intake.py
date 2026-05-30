@@ -26,6 +26,7 @@ from app.services.product_intake.domestic_page_fetcher import (
 )
 from app.services.product_intake.domestic_url_parser import DomesticUrlParseResult, parse_domestic_product_url
 from app.services.product_intake.screenshot_analyzer import ProductIntakeRequestError, sanitize_intake_text
+from app.utils.redaction import redact_text
 
 
 SCREENSHOT_MESSAGE = "请上传截图继续分析"
@@ -58,7 +59,7 @@ async def analyze_url_intake(
 
     job, link = _create_url_job_and_link(db, company_id=company_id, parsed_url=parsed_url)
 
-    if parsed_url.parse_status != "parsed":
+    if parsed_url.parse_status not in {"parsed", "shortlink"}:
         draft = _create_blank_draft(
             db,
             job,
@@ -68,6 +69,7 @@ async def analyze_url_intake(
         )
         return _build_url_response(
             job,
+            link,
             draft,
             status="needs_screenshot",
             message=SCREENSHOT_MESSAGE,
@@ -85,6 +87,7 @@ async def analyze_url_intake(
         )
         return _build_url_response(
             job,
+            link,
             draft,
             status="needs_screenshot",
             message=SCREENSHOT_MESSAGE,
@@ -102,6 +105,7 @@ async def analyze_url_intake(
         )
     )
     _update_link_from_fetch_result(db, job, link, fetch_result)
+    effective_parsed_url = _effective_parsed_url_from_fetch(db, job, link, parsed_url, fetch_result)
     if fetch_result.parse_status != "parsed":
         draft = _create_blank_draft(
             db,
@@ -112,6 +116,7 @@ async def analyze_url_intake(
         )
         return _build_url_response(
             job,
+            link,
             draft,
             status="needs_screenshot",
             message=SCREENSHOT_MESSAGE,
@@ -120,7 +125,7 @@ async def analyze_url_intake(
         )
 
     try:
-        completion = await _call_qwen_for_url(client, parsed_url, fetch_result)
+        completion = await _call_qwen_for_url(client, effective_parsed_url, fetch_result)
     except BailianError as exc:
         draft = _create_blank_draft(
             db,
@@ -131,6 +136,7 @@ async def analyze_url_intake(
         )
         return _build_url_response(
             job,
+            link,
             draft,
             status="failed",
             message=SCREENSHOT_MESSAGE,
@@ -152,6 +158,7 @@ async def analyze_url_intake(
         )
         return _build_url_response(
             job,
+            link,
             draft,
             status="failed",
             message=SCREENSHOT_MESSAGE,
@@ -169,6 +176,7 @@ async def analyze_url_intake(
         )
         return _build_url_response(
             job,
+            link,
             draft,
             status="failed",
             message=SCREENSHOT_MESSAGE,
@@ -187,6 +195,7 @@ async def analyze_url_intake(
         )
         return _build_url_response(
             job,
+            link,
             draft,
             status="needs_screenshot",
             message=SCREENSHOT_MESSAGE,
@@ -198,8 +207,8 @@ async def analyze_url_intake(
         db,
         job,
         understanding=understanding,
-        source_platform=parsed_url.platform,
-        source_url=parsed_url.normalized_url,
+        source_platform=effective_parsed_url.platform,
+        source_url=effective_parsed_url.normalized_url or link.normalized_url or parsed_url.normalized_url,
     )
     if understanding.confidence_score < LOW_CONFIDENCE_THRESHOLD:
         job.status = "needs_screenshot"
@@ -210,6 +219,7 @@ async def analyze_url_intake(
         db.refresh(draft)
         return _build_url_response(
             job,
+            link,
             draft,
             status="needs_screenshot",
             message=SCREENSHOT_MESSAGE,
@@ -219,6 +229,7 @@ async def analyze_url_intake(
 
     return _build_url_response(
         job,
+        link,
         draft,
         status="draft_ready",
         message="draft_ready",
@@ -274,6 +285,31 @@ def _update_link_from_fetch_result(
     db.commit()
     db.refresh(job)
     db.refresh(link)
+
+
+def _effective_parsed_url_from_fetch(
+    db: Session,
+    job: ProductImportJob,
+    link: DomesticProductLink,
+    parsed_url: DomesticUrlParseResult,
+    fetch_result: DomesticPageFetchResult,
+) -> DomesticUrlParseResult:
+    if parsed_url.parse_status != "shortlink" or not fetch_result.final_url:
+        return parsed_url
+
+    expanded_url = parse_domestic_product_url(fetch_result.final_url)
+    if expanded_url.parse_status != "parsed":
+        return parsed_url
+
+    link.platform = expanded_url.platform
+    link.normalized_url = expanded_url.normalized_url or None
+    link.item_id = expanded_url.item_id or None
+    link.sku_id = expanded_url.sku_id or None
+    job.source_platform = expanded_url.platform
+    db.commit()
+    db.refresh(job)
+    db.refresh(link)
+    return expanded_url
 
 
 async def _call_qwen_for_url(
@@ -410,6 +446,7 @@ def _create_draft_from_understanding(
 
 def _build_url_response(
     job: ProductImportJob,
+    link: DomesticProductLink,
     draft: ProductDraft,
     *,
     status: str,
@@ -421,6 +458,11 @@ def _build_url_response(
         job_id=job.id,
         draft_id=draft.id,
         status=status,
+        parse_status=link.parse_status,
+        source_platform=link.platform or job.source_platform,
+        normalized_url=_safe_response_text(link.normalized_url, max_length=2048),
+        item_id=_safe_response_text(link.item_id, max_length=128),
+        sku_id=_safe_response_text(link.sku_id, max_length=128),
         message=message,
         ai_result_type=ai_result_type,
         ai_fallback_used=ai_fallback_used,
@@ -429,6 +471,16 @@ def _build_url_response(
         error_message=job.error_message,
         draft=ProductDraftRead.model_validate(draft),
     )
+
+
+def _safe_response_text(value: object, *, max_length: int) -> str | None:
+    if value is None:
+        return None
+    text = redact_text(str(value)) or ""
+    text = " ".join(text.split()).strip()
+    if not text:
+        return None
+    return text[:max_length]
 
 
 def _parse_weight_kg(value: str | None) -> Decimal | None:
