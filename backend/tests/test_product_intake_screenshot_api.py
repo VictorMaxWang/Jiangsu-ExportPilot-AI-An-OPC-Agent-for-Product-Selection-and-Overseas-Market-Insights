@@ -275,6 +275,47 @@ def test_vision_disabled_or_missing_model_creates_manual_draft_without_ai_call(
     assert fake.calls == []
 
 
+def test_storage_unavailable_creates_fallback_draft_without_http_500(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, session_factory = client_with_session
+    blocked_path = tmp_path / "not-a-directory"
+    blocked_path.write_text("file blocks upload directory creation", encoding="utf-8")
+    monkeypatch.setenv("PRODUCT_UPLOAD_DIR", str(blocked_path))
+    monkeypatch.setenv("MAX_PRODUCT_IMAGE_SIZE_MB", "10")
+    monkeypatch.setenv("BAILIAN_VISION_ENABLED", "true")
+    monkeypatch.setenv("BAILIAN_VISION_MODEL", "qwen-vl-test")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "fake-secret-key")
+    get_settings.cache_clear()
+    fake = FakeVisionClient(_success_json())
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshot",
+        data={"company_id": str(company_id), "source_platform": "jd"},
+        files={"file": ("product.png", _image_bytes("PNG"), "image/png")},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["job_status"] == "draft_ready_with_low_confidence"
+    assert payload["error_code"] == "UPLOAD_STORAGE_UNAVAILABLE"
+    assert payload["ai_result_type"] == "fallback"
+    assert payload["ai_fallback_used"] is True
+    assert payload["next_action"] == "manual_fill"
+    assert fake.calls == []
+    with session_factory() as db:
+        job = db.get(ProductImportJob, payload["import_job_id"])
+        asset = db.get(ProductImportAsset, payload["asset"]["id"])
+        draft = db.get(ProductDraft, payload["draft_id"])
+        assert job is not None and job.status == "draft_ready_with_low_confidence"
+        assert asset is not None and asset.mime_type == "image/png"
+        assert draft is not None and draft.confidence_score == 0
+
+
 def test_screenshot_company_not_found_rejected_before_file_write(
     client_with_session: tuple[TestClient, sessionmaker[Session]],
     monkeypatch: pytest.MonkeyPatch,

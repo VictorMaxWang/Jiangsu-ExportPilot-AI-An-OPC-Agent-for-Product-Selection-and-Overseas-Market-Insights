@@ -68,6 +68,8 @@ class StoredScreenshot:
     file_size: int
     width: int
     height: int
+    storage_error_code: str | None = None
+    storage_error_message: str | None = None
 
 
 async def analyze_screenshot_upload(
@@ -111,6 +113,16 @@ async def analyze_screenshot_upload(
         raise
     db.refresh(job)
     db.refresh(asset)
+
+    if screenshot.storage_error_code:
+        draft = _create_fallback_draft(
+            db,
+            job,
+            code=screenshot.storage_error_code,
+            message=screenshot.storage_error_message
+            or "Screenshot storage is temporarily unavailable; please manually review the draft.",
+        )
+        return _build_screenshot_response(job, asset, draft, ai_result_type="fallback", ai_fallback_used=True)
 
     if not settings.bailian_vision_enabled:
         draft = _create_fallback_draft(
@@ -227,7 +239,6 @@ async def _read_validate_and_store(upload: UploadFile, settings: Settings) -> St
         raise ProductIntakeRequestError(422, "INVALID_IMAGE_CONTENT", "Uploaded file content did not match its image type.")
 
     base_dir = _resolve_upload_dir(settings.product_upload_dir)
-    base_dir.mkdir(parents=True, exist_ok=True)
     file_name = f"{uuid.uuid4().hex}{extension}"
     target_path = (base_dir / file_name).resolve()
     try:
@@ -236,9 +247,21 @@ async def _read_validate_and_store(upload: UploadFile, settings: Settings) -> St
         raise ProductIntakeRequestError(500, "UPLOAD_PATH_INVALID", "Upload path was not valid.") from exc
 
     try:
+        base_dir.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(data)
     except OSError as exc:
-        raise ProductIntakeRequestError(500, "UPLOAD_WRITE_FAILED", "Uploaded image could not be saved.") from exc
+        return StoredScreenshot(
+            data=data,
+            file_name=file_name,
+            file_path=_storage_path_for_db(target_path),
+            resolved_path=target_path,
+            mime_type=detected_mime,
+            file_size=len(data),
+            width=width,
+            height=height,
+            storage_error_code="UPLOAD_STORAGE_UNAVAILABLE",
+            storage_error_message="Screenshot storage is temporarily unavailable; a manual draft was created.",
+        )
 
     return StoredScreenshot(
         data=data,
