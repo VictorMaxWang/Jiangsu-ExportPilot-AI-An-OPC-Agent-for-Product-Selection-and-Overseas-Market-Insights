@@ -12,6 +12,7 @@ import { LoadingState } from "../../../_components/LoadingState";
 import {
   Company,
   ProductDraft,
+  ProductIntakeAiResultType,
   ProductIntakeSourcePlatform,
   ProductScreenshotIntakeResponse,
   ProductUrlIntakeResponse,
@@ -32,6 +33,9 @@ type ImportStatus = {
   draftId: number;
   jobId: number;
   lowConfidence: boolean;
+  aiResultType: ProductIntakeAiResultType;
+  aiFallbackUsed: boolean;
+  modelUsed: string | null;
 };
 
 type ProductImportWorkspaceProps = {
@@ -120,7 +124,7 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
       const draft = await getProductIntakeDraft(response.draft_id);
       setSelectedDraft(draft);
       setImportStatus(statusFromScreenshotResponse(response));
-      setNotice(response.low_confidence ? "已生成低置信度草稿，请人工补全后再确认入库。" : "截图识别完成，请复核草稿。");
+      setNotice(noticeFromAiResult(response.ai_result_type, "screenshot", response.error_message));
     } catch (requestError) {
       setError(getFriendlyErrorMessage(requestError));
     } finally {
@@ -150,10 +154,10 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
       setImportStatus(statusFromUrlResponse(response));
       if (response.status === "needs_screenshot") {
         setNeedsScreenshot(true);
-        setNotice("链接解析受限，已创建可人工补全的草稿。");
+        setNotice(noticeFromAiResult(response.ai_result_type, "url", response.error_message));
         return;
       }
-      setNotice(response.status === "draft_ready" ? "链接解析完成，请复核草稿。" : "链接解析未完成，可改用截图继续分析。");
+      setNotice(noticeFromAiResult(response.ai_result_type, "url", response.error_message));
     } catch (requestError) {
       setError(getFriendlyErrorMessage(requestError));
     } finally {
@@ -339,6 +343,9 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
             <div className="grid gap-3">
               <DetailItem label="来源" value={importStatus.source === "screenshot" ? "截图导入" : "链接导入"} />
               <DetailItem label="任务状态" value={importStatus.status} />
+              <DetailItem label="AI 结果" value={aiResultLabel(importStatus.aiResultType)} />
+              <DetailItem label="AI 回退" value={importStatus.aiFallbackUsed ? "是" : "否"} />
+              <DetailItem label="模型" value={importStatus.modelUsed ?? "未调用"} />
               <DetailItem label="草稿 ID" value={`#${importStatus.draftId}`} />
               <DetailItem label="任务 ID" value={`#${importStatus.jobId}`} />
               <p className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
@@ -429,10 +436,13 @@ function statusFromScreenshotResponse(response: ProductScreenshotIntakeResponse)
     source: "screenshot",
     title: "截图识别",
     status: response.job_status,
-    detail: response.error_message ?? (response.low_confidence ? "已生成低置信度草稿。" : "已生成待确认草稿。"),
+    detail: detailFromAiResult(response.ai_result_type, response.error_message, response.low_confidence),
     draftId: response.draft_id,
     jobId: response.import_job_id,
     lowConfidence: response.low_confidence,
+    aiResultType: response.ai_result_type,
+    aiFallbackUsed: response.ai_fallback_used,
+    modelUsed: response.model_used,
   };
 }
 
@@ -441,11 +451,47 @@ function statusFromUrlResponse(response: ProductUrlIntakeResponse): ImportStatus
     source: "url",
     title: "链接解析",
     status: response.status,
-    detail: response.status === "needs_screenshot" ? "该平台页面可能需要登录或动态渲染，请上传商品截图继续分析。" : response.message,
+    detail: detailFromAiResult(response.ai_result_type, response.error_message ?? response.message, response.draft.low_confidence),
     draftId: response.draft_id,
     jobId: response.job_id,
     lowConfidence: response.draft.low_confidence,
+    aiResultType: response.ai_result_type,
+    aiFallbackUsed: response.ai_fallback_used,
+    modelUsed: response.model_used,
   };
+}
+
+function aiResultLabel(value: ProductIntakeAiResultType): string {
+  if (value === "real_qwen") {
+    return "真实 Qwen 识别";
+  }
+  if (value === "fallback") {
+    return "AI 回退草稿";
+  }
+  return "需要人工处理";
+}
+
+function detailFromAiResult(value: ProductIntakeAiResultType, message: string | null, lowConfidence: boolean): string {
+  if (value === "real_qwen") {
+    return "已完成真实 Qwen 调用并生成待确认草稿。";
+  }
+  if (value === "fallback") {
+    return message ?? "真实 AI 调用未成功，已生成低置信度回退草稿。";
+  }
+  if (message && message !== "draft_ready") {
+    return message;
+  }
+  return lowConfidence ? "已生成低置信度草稿，需要人工复核或补全。" : "需要人工复核后再确认入库。";
+}
+
+function noticeFromAiResult(value: ProductIntakeAiResultType, source: ImportTab, message: string | null): string {
+  if (value === "real_qwen") {
+    return source === "screenshot" ? "真实 Qwen 截图识别完成，请复核草稿。" : "真实 Qwen 链接分析完成，请复核草稿。";
+  }
+  if (value === "fallback") {
+    return message ?? "真实 AI 调用未成功，已生成回退草稿，请人工补全后再确认入库。";
+  }
+  return source === "url" ? "链接解析受限，已创建可人工补全的草稿。" : "已生成低置信度草稿，请人工补全后再确认入库。";
 }
 
 function detectPlatformFromUrl(value: string): string {

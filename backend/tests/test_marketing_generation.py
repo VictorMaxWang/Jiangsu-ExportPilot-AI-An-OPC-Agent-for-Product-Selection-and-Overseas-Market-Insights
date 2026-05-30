@@ -77,7 +77,7 @@ def test_marketing_generate_missing_key_returns_sanitized_503(
     assert response.status_code == 503
     payload = response.json()
     assert payload["detail"]["code"] == "BAILIAN_NOT_CONFIGURED"
-    assert "BAILIAN_API_KEY" in payload["detail"]["message"]
+    assert payload["detail"]["message"] == "Bailian is not configured on the backend. Set DASHSCOPE_API_KEY."
     response_text = response.text.lower()
     assert "authorization" not in response_text
     assert "bearer" not in response_text

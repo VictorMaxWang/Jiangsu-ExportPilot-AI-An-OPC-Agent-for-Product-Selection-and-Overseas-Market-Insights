@@ -52,6 +52,7 @@ test("url tab accepts a domestic product URL and shows needs_screenshot fallback
   await page.getByRole("button", { name: "解析链接" }).click();
 
   await expect(page.getByText("链接解析受限，已创建可人工补全的草稿。")).toBeVisible();
+  await expect(page.getByText("需要人工处理")).toBeVisible();
   await expect(page.getByText("该平台页面可能需要登录或动态渲染，请上传商品截图继续分析。").first()).toBeVisible();
 
   await page.getByRole("button", { name: "切换到截图导入" }).click();
@@ -69,6 +70,7 @@ test("draft edit and confirm redirects to products list with imported product se
   await page.getByRole("button", { name: "开始识别" }).click();
 
   await expect(page.getByRole("heading", { name: "草稿编辑" })).toBeVisible();
+  await expect(page.getByText("真实 Qwen 识别")).toBeVisible();
   await page.getByLabel("商品中文名").fill("确认宠物凉感垫");
   await page.getByLabel("类目").fill("Pet supplies");
   await page.getByLabel("价格 CNY").fill("49.90");
@@ -111,6 +113,9 @@ async function mockProductIntakeApi(page: Page): Promise<void> {
         job_status: "draft_ready",
         draft_status: "draft",
         low_confidence: false,
+        ai_result_type: "real_qwen",
+        ai_fallback_used: false,
+        model_used: "qwen-vl-test",
         error_code: null,
         error_message: null,
         next_action: "review_draft",
@@ -134,6 +139,11 @@ async function mockProductIntakeApi(page: Page): Promise<void> {
         draft_id: 102,
         status: "needs_screenshot",
         message: "请上传截图继续分析",
+        ai_result_type: "manual_required",
+        ai_fallback_used: false,
+        model_used: null,
+        error_code: "URL_FETCH_TIMEOUT",
+        error_message: "请上传截图继续分析",
         draft: drafts.get(102),
       });
       return;

@@ -74,7 +74,7 @@ def _output_exception(exc: MarketingGenerationOutputError) -> HTTPException:
 def _bailian_exception(exc: BailianError) -> HTTPException:
     if isinstance(exc, BailianConfigurationError):
         http_status = status.HTTP_503_SERVICE_UNAVAILABLE
-        message = "Bailian is not configured on the backend. Set BAILIAN_API_KEY or DASHSCOPE_API_KEY."
+        message = "Bailian is not configured on the backend. Set DASHSCOPE_API_KEY."
     elif isinstance(exc, BailianTimeoutError):
         http_status = status.HTTP_504_GATEWAY_TIMEOUT
         message = redact_text(str(exc))
