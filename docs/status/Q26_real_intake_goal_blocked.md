@@ -3,7 +3,7 @@
 - Task id: Q26
 - Owner thread: Codex production closure agent
 - Start time: 2026-05-30
-- Current status time: 2026-05-31T09:28:36+08:00
+- Current status time: 2026-05-31T10:35:12+08:00
 - Status: blocked, incomplete
 
 ## Scope
@@ -28,7 +28,7 @@ The functional screenshot-upload changes were committed and pushed earlier as
 
 - Functional fix commit included in latest main: `60e30ed4556fcd1db746d318fad2baf0aaca4fa3`
 - Deploy target: latest `main` that includes the functional fix commit above.
-- Production screenshot upload retest at `2026-05-31T09:27:30+08:00`: HTTP 500
+- Production screenshot upload retest at `2026-05-31T10:35:12+08:00`: HTTP 500
 - Conclusion: the pushed screenshot upload fix has not been deployed to production, or production is still not running it.
 
 ## Production URL Intake Results
@@ -44,7 +44,8 @@ Using company `E2E 智能导入测试企业`:
 ## Screenshot Import Result
 
 - A sanitized local reference screenshot was used for production upload testing.
-- Production endpoint still returns HTTP 500.
+- A minimal valid 1x1 PNG was also uploaded to rule out a malformed screenshot fixture.
+- Production endpoint still returns HTTP 500 for both files.
 - This is the remaining functional blocker.
 
 ## Product And Downstream Flow
