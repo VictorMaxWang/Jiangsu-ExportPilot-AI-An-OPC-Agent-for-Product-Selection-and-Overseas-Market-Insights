@@ -21,12 +21,14 @@ The full goal also requires at least one confirmed product and a production flow
 - `backend/tests/test_product_intake_screenshot_api.py`
 - `scripts/deploy_prod.sh`
 
-These changes were committed and pushed earlier as `60e30ed4556fcd1db746d318fad2baf0aaca4fa3`.
+The functional screenshot-upload changes were committed and pushed earlier as
+`60e30ed4556fcd1db746d318fad2baf0aaca4fa3`.
 
 ## Deployment State
 
-- Local `main`: `60e30ed4556fcd1db746d318fad2baf0aaca4fa3`
-- GitHub `origin/main`: `60e30ed4556fcd1db746d318fad2baf0aaca4fa3`
+- Local `main`: `90d1bd0ac7f03f7ea0a3ea55fef954865eff3c55`
+- GitHub `origin/main`: `90d1bd0ac7f03f7ea0a3ea55fef954865eff3c55`
+- Functional fix commit included in latest main: `60e30ed4556fcd1db746d318fad2baf0aaca4fa3`
 - Production screenshot upload retest at `2026-05-31T09:27:30+08:00`: HTTP 500
 - Conclusion: the pushed screenshot upload fix has not been deployed to production, or production is still not running it.
 
@@ -75,7 +77,6 @@ Using company `E2E 智能导入测试企业`:
 ## Required Follow-up
 
 1. Restore the Codex Chrome/Computer Use runtime, or manually run the deployment in the existing Tencent Cloud OrcaTerm session.
-2. On the server, deploy commit `60e30ed4556fcd1db746d318fad2baf0aaca4fa3`.
+2. On the server, deploy latest `main` at or after `90d1bd0ac7f03f7ea0a3ea55fef954865eff3c55`.
 3. Retest screenshot upload and verify it returns a controlled draft result instead of HTTP 500.
 4. If screenshot upload passes, create the requested completion file `docs/status/Q26_real_intake_goal_completion.md`, then commit and push it.
-
