@@ -697,16 +697,14 @@ export async function uploadProductIntakeScreenshot(
   payload: {
     company_id: number;
     file: File;
-    source_platform?: ProductIntakeSourcePlatform | null;
+    source_platform: ProductIntakeSourcePlatform;
   },
   signal?: AbortSignal,
 ): Promise<ProductScreenshotIntakeResponse> {
   const formData = new FormData();
   formData.set("company_id", String(payload.company_id));
+  formData.set("source_platform", payload.source_platform ?? "unknown");
   formData.set("file", payload.file);
-  if (payload.source_platform) {
-    formData.set("source_platform", payload.source_platform);
-  }
   return requestJson<ProductScreenshotIntakeResponse>("/api/product-intake/screenshot", {
     method: "POST",
     body: formData,

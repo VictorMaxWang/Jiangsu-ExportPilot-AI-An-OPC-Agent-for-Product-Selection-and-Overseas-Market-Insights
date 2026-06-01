@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ProductDraftEditor } from "../../../../components/product-intake/ProductDraftEditor";
 import { EmptyState } from "../../../_components/EmptyState";
 import { ErrorState } from "../../../_components/ErrorState";
@@ -36,6 +36,7 @@ type ImportStatus = {
   aiResultType: ProductIntakeAiResultType;
   aiFallbackUsed: boolean;
   modelUsed: string | null;
+  confidenceScore: string | null;
 };
 
 type ProductImportWorkspaceProps = {
@@ -50,6 +51,7 @@ const SCREENSHOT_PLATFORM_OPTIONS: Array<{ label: string; value: ProductIntakeSo
 ];
 
 const NEEDS_SCREENSHOT_MESSAGE = "该平台页面可能需要登录或动态渲染，请上传商品截图继续分析";
+const SCREENSHOT_UPLOAD_ERROR_MESSAGE = "截图上传失败，请检查图片后重试，或稍后再试。";
 
 export function ProductImportWorkspace({ initialCompanyId = null }: ProductImportWorkspaceProps) {
   const router = useRouter();
@@ -102,6 +104,11 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
     return () => URL.revokeObjectURL(nextPreviewUrl);
   }, [screenshotFile]);
 
+  function handleScreenshotFileChange(event: ChangeEvent<HTMLInputElement>) {
+    setScreenshotFile(event.target.files?.[0] ?? null);
+    setError(null);
+  }
+
   async function handleScreenshotSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedCompanyId) {
@@ -116,6 +123,8 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
     setSubmitting("screenshot");
     setError(null);
     setNotice("正在上传截图并识别商品信息。");
+    setSelectedDraft(null);
+    setImportStatus(null);
     setNeedsScreenshot(false);
     try {
       const response = await uploadProductIntakeScreenshot({
@@ -128,7 +137,8 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
       setImportStatus(statusFromScreenshotResponse(response));
       setNotice(noticeFromAiResult(response.ai_result_type, "screenshot", response.error_message));
     } catch (requestError) {
-      setError(getFriendlyErrorMessage(requestError));
+      setError(sanitizeScreenshotError(getFriendlyErrorMessage(requestError)));
+      setNotice(null);
     } finally {
       setSubmitting(null);
     }
@@ -238,11 +248,18 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
 
             {activeTab === "screenshot" ? (
               <form className="grid gap-4" onSubmit={handleScreenshotSubmit}>
-                <CompanySelect companies={companies} value={selectedCompanyId} onChange={setSelectedCompanyId} />
+                <CompanySelect
+                  companies={companies}
+                  disabled={submitting !== null}
+                  value={selectedCompanyId}
+                  onChange={setSelectedCompanyId}
+                />
                 <label className="grid gap-2">
                   <span className="text-sm font-medium text-slate-700">选择平台</span>
                   <select
                     className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
+                    disabled={submitting !== null}
+                    name="source_platform"
                     value={screenshotPlatform}
                     onChange={(event) => setScreenshotPlatform(event.target.value as ProductIntakeSourcePlatform)}
                   >
@@ -263,8 +280,10 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
                   <input
                     accept="image/png,image/jpeg,image/webp"
                     className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                    disabled={submitting !== null}
+                    name="file"
                     type="file"
-                    onChange={(event) => setScreenshotFile(event.target.files?.[0] ?? null)}
+                    onChange={handleScreenshotFileChange}
                   />
                 </label>
                 {previewUrl ? (
@@ -290,7 +309,12 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
               </form>
             ) : (
               <form className="grid gap-4" onSubmit={handleUrlSubmit}>
-                <CompanySelect companies={companies} value={selectedCompanyId} onChange={setSelectedCompanyId} />
+                <CompanySelect
+                  companies={companies}
+                  disabled={submitting !== null}
+                  value={selectedCompanyId}
+                  onChange={setSelectedCompanyId}
+                />
                 <label className="grid gap-2">
                   <span className="text-sm font-medium text-slate-700">商品链接</span>
                   <input
@@ -360,13 +384,16 @@ export function ProductImportWorkspace({ initialCompanyId = null }: ProductImpor
               <DetailItem label="来源" value={importStatus.source === "screenshot" ? "截图导入" : "商品链接导入"} />
               <DetailItem label="任务状态" value={jobStatusLabel(importStatus.status)} />
               <DetailItem label="AI 结果" value={aiResultLabel(importStatus.aiResultType)} />
+              <DetailItem label="ai_result_type" value={importStatus.aiResultType} />
               <DetailItem label="AI 回退" value={importStatus.aiFallbackUsed ? "是" : "否"} />
-              <DetailItem label="模型" value={importStatus.modelUsed ?? "未调用"} />
-              <DetailItem label="草稿 ID" value={`#${importStatus.draftId}`} />
+              <DetailItem label="model_used" value={importStatus.modelUsed ?? "未调用"} />
+              <DetailItem label="confidence_score" value={importStatus.confidenceScore ?? "未记录"} />
+              <DetailItem label="draft_id" value={`#${importStatus.draftId}`} />
               <DetailItem label="任务 ID" value={`#${importStatus.jobId}`} />
               <p className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
                 {importStatus.detail}
               </p>
+              {selectedDraft ? <DraftSummary draft={selectedDraft} /> : null}
             </div>
           ) : (
             <p className="text-sm text-slate-500">提交截图或链接后，这里会显示识别进度和草稿状态。</p>
@@ -407,16 +434,20 @@ function CompanySelect({
   companies,
   value,
   onChange,
+  disabled = false,
 }: {
   companies: Company[];
   value: number | null;
   onChange: (companyId: number | null) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="grid gap-2">
       <span className="text-sm font-medium text-slate-700">选择企业</span>
       <select
         className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
+        disabled={disabled}
+        name="company_id"
         required
         value={value ?? ""}
         onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)}
@@ -429,6 +460,26 @@ function CompanySelect({
         ))}
       </select>
     </label>
+  );
+}
+
+function DraftSummary({ draft }: { draft: ProductDraft }) {
+  const sellingPoints = draft.selling_points?.selling_points_cn?.join("、") || "未提取";
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="text-sm font-semibold text-ink">草稿字段</h3>
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        <DetailItem label="商品中文名" value={draft.product_name_cn || "未提取"} />
+        <DetailItem label="英文名" value={draft.product_name_en || "未提取"} />
+        <DetailItem label="类目" value={draft.category || "未提取"} />
+        <DetailItem label="材质" value={draft.material || "未提取"} />
+        <DetailItem label="价格 CNY" value={draft.price_cny || "未提取"} />
+        <DetailItem label="尺寸/包装" value={draft.package_size || "未提取"} />
+      </div>
+      <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+        卖点：{sellingPoints}
+      </p>
+    </div>
   );
 }
 
@@ -459,6 +510,7 @@ function statusFromScreenshotResponse(response: ProductScreenshotIntakeResponse)
     aiResultType: response.ai_result_type,
     aiFallbackUsed: response.ai_fallback_used,
     modelUsed: response.model_used,
+    confidenceScore: response.draft.confidence_score,
   };
 }
 
@@ -474,6 +526,7 @@ function statusFromUrlResponse(response: ProductUrlIntakeResponse): ImportStatus
     aiResultType: response.ai_result_type,
     aiFallbackUsed: response.ai_fallback_used,
     modelUsed: response.model_used,
+    confidenceScore: response.draft.confidence_score,
   };
 }
 
@@ -517,14 +570,30 @@ function controlledUrlError(response: ProductUrlIntakeResponse): string {
   return sanitizeTechnicalError(response.error_message || response.message || "链接解析失败，请检查链接后重试，或上传商品截图继续分析。");
 }
 
+function sanitizeScreenshotError(message: string): string {
+  if (!message.trim()) {
+    return SCREENSHOT_UPLOAD_ERROR_MESSAGE;
+  }
+  if (hasTechnicalDetails(message)) {
+    return SCREENSHOT_UPLOAD_ERROR_MESSAGE;
+  }
+  return message;
+}
+
 function sanitizeTechnicalError(message: string): string {
   if (!message.trim()) {
     return "链接解析失败，请检查链接后重试，或上传商品截图继续分析。";
   }
-  if (/traceback|stack|exception|at\s+\S+\(|\.(py|ts|tsx|js):\d+/i.test(message)) {
+  if (hasTechnicalDetails(message)) {
     return "链接解析失败，请检查链接后重试，或上传商品截图继续分析。";
   }
   return message;
+}
+
+function hasTechnicalDetails(message: string): boolean {
+  return /traceback|stack\s*trace|exception|file\s+".+",\s+line\s+\d+|at\s+\S+\s*\(|\.(py|ts|tsx|js):\d+|[A-Za-z]:\\|\/(?:app|usr|var|home)\/|node_modules/i.test(
+    message,
+  );
 }
 
 function noticeFromAiResult(value: ProductIntakeAiResultType, source: ImportTab, message: string | null): string {

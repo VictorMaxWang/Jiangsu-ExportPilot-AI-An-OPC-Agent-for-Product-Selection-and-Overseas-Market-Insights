@@ -1,4 +1,4 @@
-import { expect, Page, Route, test } from "@playwright/test";
+import { expect, Page, Request, Route, test } from "@playwright/test";
 
 const demoCompany = {
   id: 1,
@@ -16,11 +16,8 @@ const onePixelPng = Buffer.from(
   "base64",
 );
 
-test.beforeEach(async ({ page }) => {
-  await mockProductIntakeApi(page);
-});
-
 test("product import page loads and screenshot tab accepts a local file", async ({ page }) => {
+  await mockProductIntakeApi(page);
   await page.goto("/products/import");
 
   await expect(page.getByRole("heading", { name: "智能商品导入" })).toBeVisible();
@@ -30,7 +27,7 @@ test("product import page loads and screenshot tab accepts a local file", async 
   const submitButton = page.getByRole("button", { name: "开始识别" });
   await expect(submitButton).toBeDisabled();
 
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.locator('input[name="file"]').setInputFiles({
     name: "safe-product.png",
     mimeType: "image/png",
     buffer: onePixelPng,
@@ -40,7 +37,101 @@ test("product import page loads and screenshot tab accepts a local file", async 
   await expect(submitButton).toBeEnabled();
 });
 
+test("screenshot upload posts required multipart data and shows generated draft details", async ({ page }) => {
+  let screenshotRequestSeen = false;
+
+  await mockProductIntakeApi(page, {
+    screenshotDelayMs: 300,
+    onScreenshotRequest(request) {
+      const requestUrl = new URL(request.url());
+      const contentType = request.headers()["content-type"] ?? "";
+      const body = request.postData() ?? "";
+
+      expect(request.method()).toBe("POST");
+      expect(requestUrl.pathname).toBe("/api/product-intake/screenshot");
+      expect(contentType).toContain("multipart/form-data");
+      expect(body).toContain('name="company_id"');
+      expect(body).toContain("\r\n1\r\n");
+      expect(body).toContain('name="source_platform"');
+      expect(body).toContain("\r\ntaobao\r\n");
+      expect(body).toContain('name="file"; filename="safe-product.png"');
+      screenshotRequestSeen = true;
+    },
+  });
+  await page.goto("/products/import");
+
+  await page.locator('input[name="file"]').setInputFiles({
+    name: "safe-product.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+  await page.getByRole("button", { name: "开始识别" }).click();
+
+  await expect(page.getByText("正在分析商品截图")).toBeVisible();
+  await expect(page.getByRole("button", { name: "识别中" })).toBeDisabled();
+
+  await expect(page.getByRole("heading", { name: "草稿编辑" })).toBeVisible();
+  expect(screenshotRequestSeen).toBe(true);
+  await expect(page.getByText("draft_id")).toBeVisible();
+  await expect(page.getByText("#101")).toBeVisible();
+  await expect(page.getByText("ai_result_type")).toBeVisible();
+  await expect(page.getByText("real_qwen")).toBeVisible();
+  await expect(page.getByText("qwen-vl-test")).toBeVisible();
+  await expect(page.getByText("0.8200").first()).toBeVisible();
+  await expect(page.getByText("草稿字段")).toBeVisible();
+  await expect(page.getByText("宠物凉感垫").first()).toBeVisible();
+  await expect(page.getByText("Pet supplies").first()).toBeVisible();
+  await expect(page.getByText("尼龙").first()).toBeVisible();
+});
+
+test("screenshot upload failure shows safe backend message", async ({ page }) => {
+  await mockProductIntakeApi(page, {
+    screenshotFailure: {
+      status: 400,
+      body: { detail: { message: "图片格式不支持，请上传 PNG/JPG/WebP。" } },
+    },
+  });
+  await page.goto("/products/import");
+
+  await page.locator('input[name="file"]').setInputFiles({
+    name: "safe-product.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+  await page.getByRole("button", { name: "开始识别" }).click();
+
+  await expect(page.getByText("图片格式不支持，请上传 PNG/JPG/WebP。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "草稿编辑" })).toHaveCount(0);
+});
+
+test("screenshot upload failure hides technical stack details", async ({ page }) => {
+  await mockProductIntakeApi(page, {
+    screenshotFailure: {
+      status: 500,
+      body: {
+        detail: {
+          message:
+            'Traceback (most recent call last): File "/app/backend/app/api/product_intake.py", line 42, in upload Exception: upstream failed',
+        },
+      },
+    },
+  });
+  await page.goto("/products/import");
+
+  await page.locator('input[name="file"]').setInputFiles({
+    name: "safe-product.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+  await page.getByRole("button", { name: "开始识别" }).click();
+
+  await expect(page.getByText("截图上传失败，请检查图片后重试，或稍后再试。")).toBeVisible();
+  await expect(page.getByText("Traceback")).toHaveCount(0);
+  await expect(page.getByText("/app/backend")).toHaveCount(0);
+});
+
 test("url tab accepts a domestic product URL and shows needs_screenshot fallback", async ({ page }) => {
+  await mockProductIntakeApi(page);
   await page.goto("/products/import");
 
   await page.getByRole("button", { name: "链接导入" }).click();
@@ -51,18 +142,19 @@ test("url tab accepts a domestic product URL and shows needs_screenshot fallback
 
   await page.getByRole("button", { name: "解析链接" }).click();
 
-  await expect(page.getByText("链接解析受限，已创建可人工补全的草稿。")).toBeVisible();
-  await expect(page.getByText("需要人工处理")).toBeVisible();
-  await expect(page.getByText("该平台页面可能需要登录或动态渲染，请上传商品截图继续分析。").first()).toBeVisible();
+  await expect(page.getByText("请上传截图继续分析").first()).toBeVisible();
+  await expect(page.getByText("需要人工处理").first()).toBeVisible();
+  await expect(page.getByText("该平台页面可能需要登录或动态渲染，请上传商品截图继续分析").first()).toBeVisible();
 
   await page.getByRole("button", { name: "切换到截图导入" }).click();
   await expect(page.getByText("上传图片")).toBeVisible();
 });
 
 test("draft edit and confirm redirects to products list with imported product selected", async ({ page }) => {
+  await mockProductIntakeApi(page);
   await page.goto("/products/import");
 
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.locator('input[name="file"]').setInputFiles({
     name: "safe-product.png",
     mimeType: "image/png",
     buffer: onePixelPng,
@@ -70,7 +162,7 @@ test("draft edit and confirm redirects to products list with imported product se
   await page.getByRole("button", { name: "开始识别" }).click();
 
   await expect(page.getByRole("heading", { name: "草稿编辑" })).toBeVisible();
-  await expect(page.getByText("真实 Qwen 识别")).toBeVisible();
+  await expect(page.getByLabel("商品中文名")).toHaveValue("宠物凉感垫");
   await page.getByLabel("商品中文名").fill("确认宠物凉感垫");
   await page.getByLabel("类目").fill("Pet supplies");
   await page.getByLabel("价格 CNY").fill("49.90");
@@ -81,14 +173,23 @@ test("draft edit and confirm redirects to products list with imported product se
 
   await page.getByRole("button", { name: "确认入库" }).click();
 
-  await expect(page).toHaveURL(/\/products\?company_id=1&product_id=501$/);
-  await expect(page.getByRole("heading", { name: "产品 / Products" })).toBeVisible();
+  await expect(page).toHaveURL(/\/products\?company_id=1&product_id=501&intake=confirmed$/);
+  await expect(page.getByRole("heading", { name: "产品", level: 1 })).toBeVisible();
   await expect(page.getByRole("row", { name: /确认宠物凉感垫.*Imported Pet Cooling Mat/ })).toBeVisible();
   await expect(page.getByRole("definition").filter({ hasText: "Imported Pet Cooling Mat" })).toBeVisible();
   await expect(page.getByText("该产品来自用户上传截图/链接，经 AI 提取后由用户确认。")).toBeVisible();
 });
 
-async function mockProductIntakeApi(page: Page): Promise<void> {
+type MockProductIntakeApiOptions = {
+  screenshotDelayMs?: number;
+  screenshotFailure?: {
+    status: number;
+    body: unknown;
+  };
+  onScreenshotRequest?: (request: Request) => void | Promise<void>;
+};
+
+async function mockProductIntakeApi(page: Page, options: MockProductIntakeApiOptions = {}): Promise<void> {
   const drafts = new Map<number, ProductDraftFixture>([
     [101, screenshotDraft()],
     [102, urlNeedsScreenshotDraft()],
@@ -107,6 +208,14 @@ async function mockProductIntakeApi(page: Page): Promise<void> {
     }
 
     if (method === "POST" && path === "/api/product-intake/screenshot") {
+      await options.onScreenshotRequest?.(request);
+      if (options.screenshotDelayMs) {
+        await delay(options.screenshotDelayMs);
+      }
+      if (options.screenshotFailure) {
+        await fulfillJson(route, options.screenshotFailure.body, options.screenshotFailure.status);
+        return;
+      }
       await fulfillJson(route, {
         import_job_id: 201,
         draft_id: 101,
@@ -193,6 +302,12 @@ async function mockProductIntakeApi(page: Page): Promise<void> {
     }
 
     await fulfillJson(route, { detail: "Unhandled mock API route" }, 404);
+  });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
   });
 }
 
