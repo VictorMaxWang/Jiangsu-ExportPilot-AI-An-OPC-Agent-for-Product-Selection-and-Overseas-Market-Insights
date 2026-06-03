@@ -435,6 +435,11 @@ export type AnalysisStepLog = {
   sources: Array<Record<string, unknown>>;
   fallback_used: boolean;
   fallback_reason: string | null;
+  provider_call_count: number;
+  qwen_call_count: number;
+  timeout_count: number;
+  cache_hit_count: number;
+  fallback_count: number;
   error_code: string | null;
   error_message: string | null;
 };
@@ -471,6 +476,86 @@ export type AnalysisStatusResponse = {
   started_at: string | null;
   finished_at: string | null;
   error_message: string | null;
+};
+
+export type AnalysisPerformanceEvent = {
+  type: string;
+  step_id?: string | null;
+  provider?: string | null;
+  endpoint?: string | null;
+  model?: string | null;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms: number;
+  cache_hit: boolean;
+  fallback_used: boolean;
+  timeout: boolean;
+  country?: string | null;
+  year?: number | null;
+  auth_mode?: string | null;
+  http_status?: number | null;
+  json_mode?: boolean | null;
+  fallback_reason?: string | null;
+};
+
+export type AnalysisPerformanceStep = {
+  step_id: string;
+  node: string;
+  title: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  provider_call_count: number;
+  qwen_call_count: number;
+  timeout_count: number;
+  cache_hit_count: number;
+  fallback_count: number;
+  provider_duration_ms: number;
+  qwen_duration_ms: number;
+};
+
+export type AnalysisPerformanceProviderSummary = {
+  provider: string;
+  endpoint: string;
+  call_count: number;
+  duration_ms_total: number;
+  duration_ms_max: number;
+  cache_hit_count: number;
+  fallback_count: number;
+  timeout_count: number;
+  statuses: string[];
+};
+
+export type AnalysisPerformanceQwenSummary = {
+  model: string | null;
+  operation: string;
+  call_count: number;
+  duration_ms_total: number;
+  duration_ms_max: number;
+  fallback_count: number;
+  timeout_count: number;
+  statuses: string[];
+};
+
+export type AnalysisPerformanceResponse = {
+  provider: "export_insight_workflow";
+  analysis_id: number;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  provider_call_count: number;
+  qwen_call_count: number;
+  timeout_count: number;
+  cache_hit_count: number;
+  fallback_count: number;
+  steps: AnalysisPerformanceStep[];
+  provider_summary: AnalysisPerformanceProviderSummary[];
+  qwen_summary: AnalysisPerformanceQwenSummary[];
+  events: AnalysisPerformanceEvent[];
+  truncated_event_count: number;
 };
 
 export type AnalysisInputProduct = {
@@ -855,6 +940,16 @@ export async function getAnalysisStatus(
   signal?: AbortSignal,
 ): Promise<AnalysisStatusResponse> {
   return requestJson<AnalysisStatusResponse>(`/api/analysis/${analysisId}/status`, {
+    cache: "no-store",
+    signal,
+  });
+}
+
+export async function getAnalysisPerformance(
+  analysisId: number,
+  signal?: AbortSignal,
+): Promise<AnalysisPerformanceResponse> {
+  return requestJson<AnalysisPerformanceResponse>(`/api/analysis/${analysisId}/performance`, {
     cache: "no-store",
     signal,
   });

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Literal
 
 import httpx
 
 from app.core.config import Settings, get_settings
 from app.schemas import UnComtradeTradeFlowResponse, UnComtradeTradeRecord
+from app.services.analysis_performance import is_timeout_error, record_provider_http_call
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE, DataProviderValidationError
 
 
@@ -195,11 +198,36 @@ class UnComtradeProvider:
                 params = _api_params(reporter, partner, hs_code, flow, year)
                 if subscription_key:
                     params["subscription-key"] = subscription_key
+                call_started_at = datetime.now(timezone.utc)
+                call_start = perf_counter()
                 try:
                     response = await client.get(endpoint, params=params)
                 except httpx.HTTPError as exc:
+                    timeout_error = is_timeout_error(exc)
+                    record_provider_http_call(
+                        provider="un_comtrade",
+                        endpoint="trade_data_http",
+                        status="timeout" if timeout_error else "error",
+                        started_at=call_started_at,
+                        duration_ms=max(0, round((perf_counter() - call_start) * 1000)),
+                        timeout=timeout_error,
+                        country=partner.iso3,
+                        year=year,
+                        auth_mode=auth_mode,
+                    )
                     raise _UnComtradeApiError("UN Comtrade request failed") from exc
 
+                record_provider_http_call(
+                    provider="un_comtrade",
+                    endpoint="trade_data_http",
+                    status="success" if response.status_code < 400 else "error",
+                    started_at=call_started_at,
+                    duration_ms=max(0, round((perf_counter() - call_start) * 1000)),
+                    country=partner.iso3,
+                    year=year,
+                    auth_mode=auth_mode,
+                    http_status=response.status_code,
+                )
                 payload = _response_payload(response)
                 rows = payload.get("data") if isinstance(payload, dict) else None
                 if not isinstance(rows, list):

@@ -2,6 +2,11 @@
 
 from app.schemas.analysis import (
     AnalysisDetailResponse,
+    AnalysisPerformanceEvent,
+    AnalysisPerformanceProviderSummary,
+    AnalysisPerformanceQwenSummary,
+    AnalysisPerformanceResponse,
+    AnalysisPerformanceStep,
     AnalysisRunCreate,
     AnalysisRunListItem,
     AnalysisRunRequest,
@@ -180,6 +185,11 @@ from app.schemas.scoring import (
 __all__ = [
     "AnalysisRunCreate",
     "AnalysisDetailResponse",
+    "AnalysisPerformanceEvent",
+    "AnalysisPerformanceProviderSummary",
+    "AnalysisPerformanceQwenSummary",
+    "AnalysisPerformanceResponse",
+    "AnalysisPerformanceStep",
     "AnalysisRunListItem",
     "AnalysisRunRequest",
     "AnalysisRunRead",

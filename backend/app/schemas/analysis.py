@@ -99,8 +99,93 @@ class AnalysisStepLog(BaseModel):
     sources: list[dict[str, Any]] = Field(default_factory=list)
     fallback_used: bool = False
     fallback_reason: str | None = None
+    provider_call_count: int = Field(default=0, ge=0)
+    qwen_call_count: int = Field(default=0, ge=0)
+    timeout_count: int = Field(default=0, ge=0)
+    cache_hit_count: int = Field(default=0, ge=0)
+    fallback_count: int = Field(default=0, ge=0)
     error_code: str | None = None
     error_message: str | None = None
+
+
+class AnalysisPerformanceEvent(BaseModel):
+    type: str
+    step_id: str | None = None
+    provider: str | None = None
+    endpoint: str | None = None
+    model: str | None = None
+    status: str
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int = Field(default=0, ge=0)
+    cache_hit: bool = False
+    fallback_used: bool = False
+    timeout: bool = False
+    country: str | None = None
+    year: int | None = Field(default=None, ge=0)
+    auth_mode: str | None = None
+    http_status: int | None = Field(default=None, ge=0)
+    json_mode: bool | None = None
+    fallback_reason: str | None = None
+
+
+class AnalysisPerformanceStep(BaseModel):
+    step_id: str
+    node: str
+    title: str
+    status: str
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
+    provider_call_count: int = Field(default=0, ge=0)
+    qwen_call_count: int = Field(default=0, ge=0)
+    timeout_count: int = Field(default=0, ge=0)
+    cache_hit_count: int = Field(default=0, ge=0)
+    fallback_count: int = Field(default=0, ge=0)
+    provider_duration_ms: int = Field(default=0, ge=0)
+    qwen_duration_ms: int = Field(default=0, ge=0)
+
+
+class AnalysisPerformanceProviderSummary(BaseModel):
+    provider: str
+    endpoint: str
+    call_count: int = Field(default=0, ge=0)
+    duration_ms_total: int = Field(default=0, ge=0)
+    duration_ms_max: int = Field(default=0, ge=0)
+    cache_hit_count: int = Field(default=0, ge=0)
+    fallback_count: int = Field(default=0, ge=0)
+    timeout_count: int = Field(default=0, ge=0)
+    statuses: list[str] = Field(default_factory=list)
+
+
+class AnalysisPerformanceQwenSummary(BaseModel):
+    model: str | None = None
+    operation: str
+    call_count: int = Field(default=0, ge=0)
+    duration_ms_total: int = Field(default=0, ge=0)
+    duration_ms_max: int = Field(default=0, ge=0)
+    fallback_count: int = Field(default=0, ge=0)
+    timeout_count: int = Field(default=0, ge=0)
+    statuses: list[str] = Field(default_factory=list)
+
+
+class AnalysisPerformanceResponse(BaseModel):
+    provider: str = "export_insight_workflow"
+    analysis_id: int
+    status: str
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
+    provider_call_count: int = Field(default=0, ge=0)
+    qwen_call_count: int = Field(default=0, ge=0)
+    timeout_count: int = Field(default=0, ge=0)
+    cache_hit_count: int = Field(default=0, ge=0)
+    fallback_count: int = Field(default=0, ge=0)
+    steps: list[AnalysisPerformanceStep] = Field(default_factory=list)
+    provider_summary: list[AnalysisPerformanceProviderSummary] = Field(default_factory=list)
+    qwen_summary: list[AnalysisPerformanceQwenSummary] = Field(default_factory=list)
+    events: list[AnalysisPerformanceEvent] = Field(default_factory=list)
+    truncated_event_count: int = Field(default=0, ge=0)
 
 
 class ProviderBreakdownItem(BaseModel):

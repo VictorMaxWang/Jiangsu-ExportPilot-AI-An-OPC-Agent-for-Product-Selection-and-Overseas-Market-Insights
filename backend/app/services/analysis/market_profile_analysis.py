@@ -17,6 +17,7 @@ from app.schemas import (
 from app.services.ai import BailianClient, BailianError
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_market_profile_summary_messages
+from app.services.analysis_performance import mark_latest_qwen_fallback
 from app.services.data_sources import DataSourceService
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
 
@@ -185,6 +186,7 @@ class MarketProfileAnalysisService:
             if isinstance(summary, str) and summary.strip():
                 return summary.strip(), False
         except (BailianError, AiJsonParseError, ValueError, TypeError):
+            mark_latest_qwen_fallback("market_profile_summary")
             pass
         return _fallback_summary(country_code, product_category, scores, competition_level, sources), True
 

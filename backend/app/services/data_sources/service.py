@@ -45,6 +45,7 @@ from app.services.providers.youtube import (
     normalize_country as normalize_youtube_country,
     normalize_keyword as normalize_youtube_keyword,
 )
+from app.services.analysis_performance import is_timeout_error, record_provider_call
 from app.utils.redaction import redact_mapping, redact_text
 
 
@@ -376,32 +377,68 @@ class DataSourceService:
         producer: Callable[[], Coroutine[Any, Any, T]],
         force_live: bool = False,
     ) -> T:
+        started_at = _utc_now()
         start = perf_counter()
         cached = None if force_live else self._read_cache(provider, endpoint, query_key, country_key, response_model)
         if cached is not None:
+            duration_ms = _elapsed_ms(start)
             self._write_log(
                 provider=provider,
                 endpoint=endpoint,
                 query=query_log,
                 status="cache_hit",
-                response_time_ms=_elapsed_ms(start),
+                response_time_ms=duration_ms,
                 fallback_used=bool(getattr(cached, "fallback_used", False)),
                 error_message=None,
             )
+            record_provider_call(
+                provider=provider,
+                endpoint=endpoint,
+                status="cache_hit",
+                started_at=started_at,
+                duration_ms=duration_ms,
+                cache_hit=True,
+                fallback_used=bool(getattr(cached, "fallback_used", False)),
+                country=country_key,
+            )
             return cached
 
-        response = await producer()
+        try:
+            response = await producer()
+        except Exception as exc:
+            timeout = is_timeout_error(exc)
+            record_provider_call(
+                provider=provider,
+                endpoint=endpoint,
+                status="timeout" if timeout else "error",
+                started_at=started_at,
+                duration_ms=_elapsed_ms(start),
+                timeout=timeout,
+                country=country_key,
+            )
+            raise
+
         fallback_used = bool(getattr(response, "fallback_used", False))
         source = _response_source(response)
         self._write_cache(provider, endpoint, query_key, country_key, response, fallback_used, source)
+        duration_ms = _elapsed_ms(start)
         self._write_log(
             provider=provider,
             endpoint=endpoint,
             query=query_log,
             status="fallback" if fallback_used else "success",
-            response_time_ms=_elapsed_ms(start),
+            response_time_ms=duration_ms,
             fallback_used=fallback_used,
             error_message="Provider failed or unavailable; CSV fallback used." if fallback_used else None,
+        )
+        record_provider_call(
+            provider=provider,
+            endpoint=endpoint,
+            status="fallback" if fallback_used else "success",
+            started_at=started_at,
+            duration_ms=duration_ms,
+            fallback_used=fallback_used,
+            country=country_key,
         )
         return response
 

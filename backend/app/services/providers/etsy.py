@@ -5,12 +5,14 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import httpx
 
 from app.core.config import Settings, get_settings
 from app.schemas import EtsyListingItem, EtsySearchResponse
+from app.services.analysis_performance import is_timeout_error, record_provider_http_call
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE, DataProviderValidationError
 
 
@@ -176,12 +178,33 @@ class EtsyProvider:
 
         headers = self._auth_headers()
         timeout = httpx.Timeout(self._timeout_seconds, connect=5.0)
+        started_at = datetime.now(timezone.utc)
+        start = perf_counter()
         try:
             async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
                 response = await client.get(self._endpoint, params=params, headers=headers)
         except httpx.HTTPError as exc:
+            timeout_error = is_timeout_error(exc)
+            record_provider_http_call(
+                provider="etsy",
+                endpoint="search_competitors_http",
+                status="timeout" if timeout_error else "error",
+                started_at=started_at,
+                duration_ms=max(0, round((perf_counter() - start) * 1000)),
+                timeout=timeout_error,
+                country=country,
+            )
             raise _EtsyApiError("Etsy request failed") from exc
 
+        record_provider_http_call(
+            provider="etsy",
+            endpoint="search_competitors_http",
+            status="success" if response.status_code < 400 else "error",
+            started_at=started_at,
+            duration_ms=max(0, round((perf_counter() - start) * 1000)),
+            country=country,
+            http_status=response.status_code,
+        )
         if response.status_code >= 400:
             code = (
                 ETSY_LISTINGS_REQUIRES_OAUTH_OR_APPROVAL

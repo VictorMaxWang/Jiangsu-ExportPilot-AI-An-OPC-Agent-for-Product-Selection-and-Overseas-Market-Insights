@@ -9,6 +9,7 @@ from app.api.ai import get_bailian_client
 from app.db import get_db
 from app.schemas import (
     AnalysisDetailResponse,
+    AnalysisPerformanceResponse,
     AnalysisRunRequest,
     AnalysisRunStartResponse,
     AnalysisStatusResponse,
@@ -60,6 +61,17 @@ def get_analysis_status(
     workflow: ExportInsightWorkflow = Depends(get_export_insight_workflow),
 ) -> AnalysisStatusResponse:
     response = workflow.status(analysis_id)
+    if response is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis run not found")
+    return response
+
+
+@router.get("/{analysis_id}/performance", response_model=AnalysisPerformanceResponse)
+def get_analysis_performance(
+    analysis_id: int,
+    workflow: ExportInsightWorkflow = Depends(get_export_insight_workflow),
+) -> AnalysisPerformanceResponse:
+    response = workflow.performance(analysis_id)
     if response is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis run not found")
     return response

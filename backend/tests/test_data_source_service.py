@@ -20,6 +20,12 @@ from app.schemas import (
     YoutubeSearchResponse,
     YoutubeVideoItem,
 )
+from app.services.analysis_performance import (
+    AnalysisPerformanceRecorder,
+    analysis_performance_scope,
+    get_performance_events,
+    step_performance_counts,
+)
 from app.services.data_sources import DataSourceService
 
 
@@ -87,6 +93,53 @@ def test_youtube_fallback_is_cached_and_logs_cache_hit(db_session: Session) -> N
     assert provider.calls == 1
     assert _cache_providers(db_session) == {"youtube"}
     assert _log_statuses(db_session) == ["fallback", "cache_hit"]
+
+
+def test_data_source_service_records_safe_performance_events_for_fallback_and_cache_hit(
+    db_session: Session,
+) -> None:
+    provider = FailingYoutubeProvider()
+    service = DataSourceService(db_session, youtube_provider=provider)
+    state: dict[str, object] = {}
+
+    async def run_calls() -> None:
+        with analysis_performance_scope(AnalysisPerformanceRecorder(state), "test_step"):
+            await service.search_video_trends("home decor", country="US")
+            await service.search_video_trends("home decor", country="US")
+
+    asyncio.run(run_calls())
+
+    events = [event for event in get_performance_events(state) if event.get("type") == "provider"]
+    assert [event["status"] for event in events] == ["fallback", "cache_hit"]
+    assert events[0]["provider"] == "youtube"
+    assert events[0]["endpoint"] == "search_video_trends"
+    assert events[0]["fallback_used"] is True
+    assert events[1]["cache_hit"] is True
+    assert step_performance_counts(state, "test_step")["cache_hit_count"] == 1
+
+    serialized = str(events).casefold()
+    assert "authorization" not in serialized
+    assert "cookie" not in serialized
+    assert "api_key" not in serialized
+    assert "home decor" not in serialized
+
+
+def test_data_source_service_records_success_performance_event(db_session: Session) -> None:
+    service = DataSourceService(db_session, youtube_provider=LiveYoutubeProvider())
+    state: dict[str, object] = {}
+
+    async def run_call() -> None:
+        with analysis_performance_scope(AnalysisPerformanceRecorder(state), "test_step"):
+            await service.search_video_trends("home decor", country="US", force_live=True)
+
+    asyncio.run(run_call())
+
+    events = [event for event in get_performance_events(state) if event.get("type") == "provider"]
+    assert len(events) == 1
+    assert events[0]["provider"] == "youtube"
+    assert events[0]["status"] == "success"
+    assert events[0]["fallback_used"] is False
+    assert step_performance_counts(state, "test_step")["provider_call_count"] == 1
 
 
 def test_force_live_bypasses_fresh_youtube_cache(db_session: Session) -> None:

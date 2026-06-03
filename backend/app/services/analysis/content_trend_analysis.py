@@ -16,6 +16,7 @@ from app.schemas import (
 from app.services.ai import BailianClient, BailianError
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_content_trend_analysis_messages
+from app.services.analysis_performance import mark_latest_qwen_fallback
 from app.services.data_sources import DataSourceService
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
 
@@ -111,6 +112,7 @@ class ContentTrendAnalysisService:
             parsed = parse_json_object(result.content)
             return _validated_analysis(parsed, fallback_analysis), False
         except (BailianError, AiJsonParseError, ValueError, TypeError):
+            mark_latest_qwen_fallback("content_trend_analysis")
             return fallback_analysis, True
 
 

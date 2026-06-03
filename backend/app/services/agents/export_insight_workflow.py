@@ -16,6 +16,11 @@ from app.db.session import SessionLocal
 from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductDraft, ProductKeyword, Report
 from app.schemas import (
     AnalysisDetailResponse,
+    AnalysisPerformanceEvent,
+    AnalysisPerformanceProviderSummary,
+    AnalysisPerformanceQwenSummary,
+    AnalysisPerformanceResponse,
+    AnalysisPerformanceStep,
     AnalysisRunRequest,
     AnalysisRunStartResponse,
     AnalysisStatusResponse,
@@ -38,6 +43,17 @@ from app.services.ai import (
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_marketing_copy_messages, build_report_section_messages
 from app.services.analysis import ContentTrendAnalysisService, MarketProfileAnalysisService, analyze_competitors
+from app.services.analysis_performance import (
+    PROVIDER_EVENT_TYPES,
+    QWEN_EVENT_TYPE,
+    AnalysisPerformanceRecorder,
+    PerformanceBailianClient,
+    analysis_performance_scope,
+    get_performance_events,
+    get_truncated_event_count,
+    mark_latest_qwen_fallback,
+    step_performance_counts,
+)
 from app.services.data_sources import DataSourceService
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
 from app.services.reports import ReportGenerationInputError, ReportGenerator
@@ -144,6 +160,7 @@ class ExportInsightWorkflow:
             "marketing_assets": [],
             "reports": [],
             "next_page_url": None,
+            "performance": {"events": [], "truncated_event_count": 0},
         }
         analysis_run = AnalysisRun(
             company_id=request.company_id,
@@ -176,7 +193,7 @@ class ExportInsightWorkflow:
             analysis_run=analysis_run,
             request=request,
             data_sources=self._data_sources,
-            ai_client=self._ai_client,
+            ai_client=PerformanceBailianClient(self._ai_client),
             state=state,
         )
 
@@ -228,6 +245,31 @@ class ExportInsightWorkflow:
             workflow_state=_jsonable(state),
         )
 
+    def performance(self, analysis_id: int) -> AnalysisPerformanceResponse | None:
+        analysis_run = self._db.get(AnalysisRun, analysis_id)
+        if analysis_run is None:
+            return None
+        state = dict(analysis_run.workflow_state or {})
+        events = get_performance_events(state)
+        totals = _performance_counts_from_events(events)
+        return AnalysisPerformanceResponse(
+            analysis_id=analysis_run.id,
+            status=analysis_run.status,
+            started_at=analysis_run.started_at,
+            finished_at=analysis_run.finished_at,
+            duration_ms=_analysis_duration_ms(analysis_run),
+            provider_call_count=totals["provider_call_count"],
+            qwen_call_count=totals["qwen_call_count"],
+            timeout_count=totals["timeout_count"],
+            cache_hit_count=totals["cache_hit_count"],
+            fallback_count=totals["fallback_count"],
+            steps=_performance_steps(analysis_run.step_logs or [], events),
+            provider_summary=_performance_provider_summary(events),
+            qwen_summary=_performance_qwen_summary(events),
+            events=[AnalysisPerformanceEvent.model_validate(event) for event in events],
+            truncated_event_count=get_truncated_event_count(state),
+        )
+
     def start_response(self, analysis_run: AnalysisRun) -> AnalysisRunStartResponse:
         return AnalysisRunStartResponse(
             analysis_id=analysis_run.id,
@@ -254,6 +296,7 @@ class ExportInsightWorkflow:
                 "started_at": started_at.isoformat(),
                 "finished_at": None,
                 "duration_ms": None,
+                **_zero_performance_counts(),
                 "error_code": None,
                 "error_message": None,
             },
@@ -263,14 +306,26 @@ class ExportInsightWorkflow:
         context.analysis_run.workflow_state = _persistable_state(context.state)
         self._db.commit()
 
+        recorder = AnalysisPerformanceRecorder(context.state)
         try:
-            result = await agent.run(context)
+            with analysis_performance_scope(recorder, step.step_id):
+                result = await agent.run(context)
         except WorkflowInputError as exc:
             message = redact_text(str(exc)) or "Workflow input failed."
-            self._fail_step(context.analysis_run, step.step_id, exc.code, message, started_at, start)
+            context.analysis_run.workflow_state = _persistable_state(context.state)
+            self._fail_step(
+                context.analysis_run,
+                step.step_id,
+                exc.code,
+                message,
+                started_at,
+                start,
+                metrics=step_performance_counts(context.state, step.step_id),
+            )
             self._mark_run_failed(context.analysis_run, message)
             return None
         except Exception:
+            context.analysis_run.workflow_state = _persistable_state(context.state)
             self._fail_step(
                 context.analysis_run,
                 step.step_id,
@@ -278,6 +333,7 @@ class ExportInsightWorkflow:
                 "Workflow step failed with a sanitized internal error.",
                 started_at,
                 start,
+                metrics=step_performance_counts(context.state, step.step_id),
             )
             self._mark_run_failed(context.analysis_run, "Workflow step failed.")
             return None
@@ -299,6 +355,7 @@ class ExportInsightWorkflow:
                 "status": status,
                 "finished_at": finished_at.isoformat(),
                 "duration_ms": max(0, round((perf_counter() - start) * 1000)),
+                **step_performance_counts(context.state, step.step_id),
                 "output_summary": _jsonable(result.output_summary),
                 "sources": _jsonable(result.sources or []),
                 "fallback_used": result.fallback_used,
@@ -354,6 +411,8 @@ class ExportInsightWorkflow:
         message: str,
         started_at: datetime,
         start: float,
+        *,
+        metrics: dict[str, int] | None = None,
     ) -> None:
         self._update_step(
             analysis_run,
@@ -363,6 +422,7 @@ class ExportInsightWorkflow:
                 "started_at": started_at.isoformat(),
                 "finished_at": _utc_now().isoformat(),
                 "duration_ms": max(0, round((perf_counter() - start) * 1000)),
+                **(metrics or _zero_performance_counts()),
                 "error_code": code,
                 "error_message": redact_text(message),
             },
@@ -511,6 +571,7 @@ class ProductUnderstandingAgent(BaseWorkflowAgent):
                     keyword = generated_keywords[0] if generated_keywords else result.product_name_en
                     keyword_source = "bailian_generated"
                 except (BailianError, AiStructuredOutputError):
+                    mark_latest_qwen_fallback("product_keyword_generation")
                     ai_fallback_used = True
                     keyword = keyword or _fallback_keyword(product)
                     keyword_source = "product_fields_fallback"
@@ -827,6 +888,7 @@ class MarketingPrepAgent(BaseWorkflowAgent):
                     selling_points=_selling_points_from_score(row),
                 )
             except (BailianError, AiJsonParseError, ValidationError, ValueError, TypeError):
+                mark_latest_qwen_fallback("marketing_copy")
                 ai_fallback_used = True
                 copy = _fallback_marketing_copy(product, row.country, keywords)
             assets.append(
@@ -871,6 +933,8 @@ class ReportPrepAgent(BaseWorkflowAgent):
         report = outcome.report
         next_page_url = NEXT_PAGE_URL_TEMPLATE.format(analysis_id=context.analysis_run.id)
         state = dict(context.analysis_run.workflow_state or context.state)
+        if isinstance(context.state.get("performance"), dict):
+            state["performance"] = context.state["performance"]
         reports = list(state.get("reports") or [])
         context.state = state
         return StepResult(
@@ -918,6 +982,7 @@ def _initial_step_logs() -> list[dict[str, Any]]:
             "started_at": None,
             "finished_at": None,
             "duration_ms": None,
+            **_zero_performance_counts(),
             "input_summary": {},
             "output_summary": {},
             "sources": [],
@@ -928,6 +993,16 @@ def _initial_step_logs() -> list[dict[str, Any]]:
         }
         for step in WORKFLOW_STEPS
     ]
+
+
+def _zero_performance_counts() -> dict[str, int]:
+    return {
+        "provider_call_count": 0,
+        "qwen_call_count": 0,
+        "timeout_count": 0,
+        "cache_hit_count": 0,
+        "fallback_count": 0,
+    }
 
 
 def _products_for_request(db: Session, request: AnalysisRunRequest) -> list[Product]:
@@ -1222,6 +1297,195 @@ def _scoring_summary(rows: list[OpportunityScore]) -> ScoringSummary:
 
 def _any_step_fallback(logs: list[dict[str, Any]]) -> bool:
     return any(log.get("status") == WORKFLOW_STATUS_FALLBACK_USED or log.get("fallback_used") for log in logs)
+
+
+def _analysis_duration_ms(analysis_run: AnalysisRun) -> int | None:
+    if analysis_run.started_at is None:
+        return None
+    finished_at = analysis_run.finished_at or _utc_now()
+    return _datetime_delta_ms(analysis_run.started_at, finished_at)
+
+
+def _performance_steps(
+    step_logs: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+) -> list[AnalysisPerformanceStep]:
+    rows: list[AnalysisPerformanceStep] = []
+    for log in step_logs:
+        if not isinstance(log, dict):
+            continue
+        step_id = str(log.get("step_id") or "")
+        step_events = [event for event in events if event.get("step_id") == step_id]
+        event_counts = _performance_counts_from_events(step_events)
+        rows.append(
+            AnalysisPerformanceStep(
+                step_id=step_id,
+                node=str(log.get("node") or ""),
+                title=str(log.get("title") or ""),
+                status=str(log.get("status") or WORKFLOW_STATUS_WAITING),
+                started_at=log.get("started_at"),
+                finished_at=log.get("finished_at"),
+                duration_ms=_optional_int(log.get("duration_ms")),
+                provider_call_count=_log_count(log, "provider_call_count", event_counts),
+                qwen_call_count=_log_count(log, "qwen_call_count", event_counts),
+                timeout_count=_log_count(log, "timeout_count", event_counts),
+                cache_hit_count=_log_count(log, "cache_hit_count", event_counts),
+                fallback_count=_log_count(log, "fallback_count", event_counts),
+                provider_duration_ms=sum(
+                    _event_int(event, "duration_ms")
+                    for event in step_events
+                    if event.get("type") in PROVIDER_EVENT_TYPES
+                ),
+                qwen_duration_ms=sum(
+                    _event_int(event, "duration_ms") for event in step_events if event.get("type") == QWEN_EVENT_TYPE
+                ),
+            )
+        )
+    return rows
+
+
+def _performance_provider_summary(events: list[dict[str, Any]]) -> list[AnalysisPerformanceProviderSummary]:
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for event in events:
+        if event.get("type") not in PROVIDER_EVENT_TYPES:
+            continue
+        key = (str(event.get("provider") or "unknown"), str(event.get("endpoint") or "unknown"))
+        item = grouped.setdefault(
+            key,
+            {
+                "call_count": 0,
+                "duration_ms_total": 0,
+                "duration_ms_max": 0,
+                "cache_hit_count": 0,
+                "fallback_count": 0,
+                "timeout_count": 0,
+                "statuses": set(),
+            },
+        )
+        duration_ms = _event_int(event, "duration_ms")
+        item["call_count"] += 1
+        item["duration_ms_total"] += duration_ms
+        item["duration_ms_max"] = max(int(item["duration_ms_max"]), duration_ms)
+        item["cache_hit_count"] += 1 if _event_bool(event, "cache_hit") else 0
+        item["fallback_count"] += 1 if _is_fallback_event(event) else 0
+        item["timeout_count"] += 1 if _is_timeout_event(event) else 0
+        item["statuses"].add(str(event.get("status") or "unknown"))
+
+    return [
+        AnalysisPerformanceProviderSummary(
+            provider=provider,
+            endpoint=endpoint,
+            call_count=int(values["call_count"]),
+            duration_ms_total=int(values["duration_ms_total"]),
+            duration_ms_max=int(values["duration_ms_max"]),
+            cache_hit_count=int(values["cache_hit_count"]),
+            fallback_count=int(values["fallback_count"]),
+            timeout_count=int(values["timeout_count"]),
+            statuses=sorted(values["statuses"]),
+        )
+        for (provider, endpoint), values in sorted(
+            grouped.items(),
+            key=lambda item: (-int(item[1]["duration_ms_total"]), item[0][0], item[0][1]),
+        )
+    ]
+
+
+def _performance_qwen_summary(events: list[dict[str, Any]]) -> list[AnalysisPerformanceQwenSummary]:
+    grouped: dict[tuple[str | None, str], dict[str, Any]] = {}
+    for event in events:
+        if event.get("type") != QWEN_EVENT_TYPE:
+            continue
+        model = str(event.get("model") or "") or None
+        operation = str(event.get("endpoint") or "chat")
+        item = grouped.setdefault(
+            (model, operation),
+            {
+                "call_count": 0,
+                "duration_ms_total": 0,
+                "duration_ms_max": 0,
+                "fallback_count": 0,
+                "timeout_count": 0,
+                "statuses": set(),
+            },
+        )
+        duration_ms = _event_int(event, "duration_ms")
+        item["call_count"] += 1
+        item["duration_ms_total"] += duration_ms
+        item["duration_ms_max"] = max(int(item["duration_ms_max"]), duration_ms)
+        item["fallback_count"] += 1 if _is_fallback_event(event) else 0
+        item["timeout_count"] += 1 if _is_timeout_event(event) else 0
+        item["statuses"].add(str(event.get("status") or "unknown"))
+
+    return [
+        AnalysisPerformanceQwenSummary(
+            model=model,
+            operation=operation,
+            call_count=int(values["call_count"]),
+            duration_ms_total=int(values["duration_ms_total"]),
+            duration_ms_max=int(values["duration_ms_max"]),
+            fallback_count=int(values["fallback_count"]),
+            timeout_count=int(values["timeout_count"]),
+            statuses=sorted(values["statuses"]),
+        )
+        for (model, operation), values in sorted(
+            grouped.items(),
+            key=lambda item: (-int(item[1]["duration_ms_total"]), item[0][1], item[0][0] or ""),
+        )
+    ]
+
+
+def _performance_counts_from_events(events: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "provider_call_count": sum(1 for event in events if event.get("type") in PROVIDER_EVENT_TYPES),
+        "qwen_call_count": sum(1 for event in events if event.get("type") == QWEN_EVENT_TYPE),
+        "timeout_count": sum(1 for event in events if _is_timeout_event(event)),
+        "cache_hit_count": sum(1 for event in events if _event_bool(event, "cache_hit")),
+        "fallback_count": sum(1 for event in events if _is_fallback_event(event)),
+    }
+
+
+def _log_count(log: dict[str, Any], key: str, event_counts: dict[str, int]) -> int:
+    value = log.get(key)
+    if value is None:
+        return event_counts[key]
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return event_counts[key]
+
+
+def _is_timeout_event(event: dict[str, Any]) -> bool:
+    return _event_bool(event, "timeout") or event.get("status") == "timeout"
+
+
+def _is_fallback_event(event: dict[str, Any]) -> bool:
+    return _event_bool(event, "fallback_used") or event.get("status") == "fallback"
+
+
+def _event_bool(event: dict[str, Any], key: str) -> bool:
+    return event.get(key) is True
+
+
+def _event_int(event: dict[str, Any], key: str) -> int:
+    try:
+        return max(0, int(event.get(key) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _datetime_delta_ms(started_at: datetime, finished_at: datetime) -> int:
+    start = started_at if started_at.tzinfo is not None else started_at.replace(tzinfo=timezone.utc)
+    finish = finished_at if finished_at.tzinfo is not None else finished_at.replace(tzinfo=timezone.utc)
+    return max(0, round((finish - start).total_seconds() * 1000))
 
 
 async def _marketing_copy(

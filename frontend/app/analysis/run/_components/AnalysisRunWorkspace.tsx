@@ -679,6 +679,11 @@ function buildInitialSteps(): AnalysisStepLog[] {
     sources: [],
     fallback_used: false,
     fallback_reason: null,
+    provider_call_count: 0,
+    qwen_call_count: 0,
+    timeout_count: 0,
+    cache_hit_count: 0,
+    fallback_count: 0,
     error_code: null,
     error_message: null,
   }));

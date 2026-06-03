@@ -52,6 +52,21 @@ def test_analysis_api_starts_background_workflow_and_returns_pollable_status(
     assert len(detail_payload["reports"]) == 1
     assert detail_payload["marketing_assets"]
 
+    performance_response = client.get(f"/api/analysis/{analysis_id}/performance")
+    assert performance_response.status_code == 200
+    performance_payload = performance_response.json()
+    assert performance_payload["analysis_id"] == analysis_id
+    assert len(performance_payload["steps"]) == 9
+    assert performance_payload["provider_call_count"] > 0
+    assert performance_payload["qwen_call_count"] > 0
+    assert performance_payload["provider_summary"]
+    assert performance_payload["qwen_summary"]
+    serialized = str(performance_payload).lower()
+    assert "authorization" not in serialized
+    assert "cookie" not in serialized
+    assert "api_key" not in serialized
+    assert ".env" not in serialized
+
 
 def test_analysis_api_returns_404_for_unknown_analysis(
     client_with_session: tuple[TestClient, sessionmaker[Session]],
@@ -59,8 +74,10 @@ def test_analysis_api_returns_404_for_unknown_analysis(
     client, _session_factory = client_with_session
 
     response = client.get("/api/analysis/99999/status")
+    performance_response = client.get("/api/analysis/99999/performance")
 
     assert response.status_code == 404
+    assert performance_response.status_code == 404
 
 
 def test_analysis_api_returns_404_for_missing_company(

@@ -18,6 +18,7 @@ from app.services import report_service
 from app.services.ai import BailianClient, BailianError
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_report_generation_messages
+from app.services.analysis_performance import mark_latest_qwen_fallback
 from app.services.dashboard_service import DashboardService
 
 
@@ -231,6 +232,7 @@ class ReportGenerator:
             _validate_report_markdown(content_markdown)
             return content_markdown, False
         except (BailianError, AiJsonParseError, ValueError, TypeError):
+            mark_latest_qwen_fallback("report_generation")
             fallback = _ensure_intake_source_markdown(_fallback_notice(deterministic_markdown), report_input)
             _validate_report_markdown(fallback)
             return fallback, True

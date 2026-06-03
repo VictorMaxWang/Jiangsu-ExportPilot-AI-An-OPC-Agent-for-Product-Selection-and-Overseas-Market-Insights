@@ -14,7 +14,7 @@ from app.db.base import Base
 from app.models import Company, OpportunityScore, Product, ProductDraft, ProductImportJob, ProductKeyword, Report
 from app.schemas import AnalysisRunRequest
 from app.services.agents import ExportInsightWorkflow
-from app.services.ai import BailianChatCompletion
+from app.services.ai import BailianChatCompletion, BailianTimeoutError
 from app.services.data_sources import DataSourceService
 
 
@@ -64,6 +64,26 @@ def test_export_insight_workflow_completes_with_provider_and_ai_fallback(
     assert len(detail.reports) == 1
     assert detail.marketing_assets
     assert detail.next_page_url == f"/reports?analysis_id={analysis_run.id}"
+
+    performance = workflow.performance(analysis_run.id)
+    assert performance is not None
+    assert len(performance.steps) == 9
+    assert performance.provider_call_count > 0
+    assert performance.qwen_call_count > 0
+    assert performance.fallback_count > 0
+    assert performance.cache_hit_count > 0
+    assert performance.provider_summary
+    assert performance.qwen_summary
+    assert any(step.step_id == "03_data_collection" and step.provider_call_count > 0 for step in performance.steps)
+    assert any(step.step_id == "07_opportunity_scoring" and step.provider_call_count > 0 for step in performance.steps)
+    assert all(step.provider_call_count >= 0 for step in performance.steps)
+
+    serialized = json.dumps(performance.model_dump(mode="json"), ensure_ascii=False).casefold()
+    assert "authorization" not in serialized
+    assert "cookie" not in serialized
+    assert "api_key" not in serialized
+    assert ".env" not in serialized
+    assert "secret-token" not in serialized
 
 
 def test_workflow_generates_missing_import_product_keywords_and_preserves_intake_evidence(
@@ -168,6 +188,35 @@ def test_workflow_uses_deterministic_keyword_when_qwen_keyword_generation_fails(
     assert db_session.scalar(select(OpportunityScore).where(OpportunityScore.analysis_id == analysis_run.id)) is not None
 
 
+def test_workflow_records_qwen_timeout_count(
+    db_session: Session,
+) -> None:
+    company_id, product_id = _seed_product(db_session)
+    workflow = ExportInsightWorkflow(
+        db_session,
+        _failing_data_source_service(db_session),
+        ai_client=TimeoutAiClient(),
+    )
+    analysis_run = workflow.create_run(
+        AnalysisRunRequest(
+            company_id=company_id,
+            product_ids=[product_id],
+            target_countries=["US"],
+            competitor_limit=8,
+        )
+    )
+
+    status = asyncio.run(workflow.run(analysis_run.id))
+
+    assert status is not None
+    assert status.status == "fallback_used"
+    performance = workflow.performance(analysis_run.id)
+    assert performance is not None
+    assert performance.timeout_count > 0
+    assert any(event.type == "qwen" and event.timeout for event in performance.events)
+    assert any(step.qwen_call_count > 0 and step.timeout_count > 0 for step in performance.steps)
+
+
 @pytest.fixture()
 def db_session() -> Generator[Session, None, None]:
     engine = create_engine(
@@ -213,6 +262,11 @@ class FailingEtsyProvider:
 class BadJsonAiClient:
     async def chat(self, *args: object, **kwargs: object) -> BailianChatCompletion:
         return BailianChatCompletion(content="not json", model="qwen3.6-plus")
+
+
+class TimeoutAiClient:
+    async def chat(self, *args: object, **kwargs: object) -> BailianChatCompletion:
+        raise BailianTimeoutError("Bailian request timed out.")
 
 
 class KeywordThenBadJsonAiClient:
