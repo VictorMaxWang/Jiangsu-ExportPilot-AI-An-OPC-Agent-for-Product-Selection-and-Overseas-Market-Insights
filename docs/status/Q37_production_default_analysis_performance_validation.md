@@ -52,6 +52,17 @@ Second access audit at `2026-06-04 08:45 +08:00`:
 | Latest GitHub Actions run metadata | Completed with `failure`, but the jobs endpoint returned `total_count=0`, so no failed-job log was available to inspect. |
 | Public production health | `GET /health` returned `{"status":"ok","service":"supinzhihang-backend"}`. |
 
+Third access audit at `2026-06-04 08:45:31 +08:00`:
+
+| Check | Result |
+| --- | --- |
+| Local repo | Synced with `origin/main` at `c8b2a1b`; only pre-existing untracked `docs/status/Q32_production_performance_baseline.md` remains. |
+| Public production health | `GET /health` returned `{"status":"ok","service":"supinzhihang-backend"}`. |
+| `ssh root@opc.ankangyu.cn "cd /opt/supinzhihang && git rev-parse --short HEAD"` | Blocked: permission denied for available SSH identity. |
+| `ssh root@110.42.218.147 "cd /opt/supinzhihang && git rev-parse --short HEAD"` | Blocked: permission denied for available SSH identity. |
+| Local SSH material | `$HOME\.ssh` contains only `known_hosts` files; no private key is present and no secret was read. |
+| Latest GitHub Actions run metadata | Completed with `failure`; the jobs endpoint again returned `total_count=0`. |
+
 ## Production smoke results
 
 Post-deploy production smoke was not run because deployment did not complete.
