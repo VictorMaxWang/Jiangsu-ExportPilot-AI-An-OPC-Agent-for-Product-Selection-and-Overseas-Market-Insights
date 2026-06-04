@@ -89,9 +89,18 @@ class ReportGenerationOutcome:
 
 
 class ReportGenerator:
-    def __init__(self, db: Session, *, ai_client: BailianClient | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        *,
+        ai_client: BailianClient | None = None,
+        ai_timeout_seconds: float | None = None,
+        force_deterministic: bool = False,
+    ) -> None:
         self._db = db
         self._ai_client = ai_client or BailianClient()
+        self._ai_timeout_seconds = ai_timeout_seconds
+        self._force_deterministic = force_deterministic
 
     async def generate_from_analysis(
         self,
@@ -216,6 +225,10 @@ class ReportGenerator:
             "required_sections": list(REPORT_SECTION_TITLES),
             "output_contract": {"content_markdown": "string"},
         }
+        if self._force_deterministic:
+            fallback = _ensure_intake_source_markdown(deterministic_markdown, report_input)
+            _validate_report_markdown(fallback)
+            return fallback, False
         try:
             result = await wait_for_qwen(
                 self._ai_client.chat(
@@ -223,7 +236,8 @@ class ReportGenerator:
                     temperature=0.25,
                     max_tokens=3600,
                     json_mode=True,
-                )
+                ),
+                timeout_seconds=self._ai_timeout_seconds,
             )
             parsed = parse_json_object(result.content)
             content_markdown = parsed.get("content_markdown")

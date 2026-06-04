@@ -17,6 +17,7 @@ from app.schemas import (
 from app.services.ai import BailianClient, BailianError
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_market_profile_summary_messages
+from app.services.ai.qwen_timeout import wait_for_qwen
 from app.services.analysis_performance import mark_latest_qwen_fallback
 from app.services.data_sources import DataSourceService
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
@@ -25,6 +26,7 @@ from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_SEED_DIR = PROJECT_ROOT / "data" / "seed"
 TARGET_COUNTRIES = ("US", "GB", "JP", "AU", "SG")
+DEFAULT_MARKET_PROFILE_QWEN_TIMEOUT_SECONDS = 20.0
 
 MARKET_LEVEL_SCORE = {"high": 85, "medium": 65, "low": 40}
 LOGISTICS_SCORE = {"low": 90, "medium": 70, "high": 45}
@@ -50,18 +52,24 @@ class MarketProfileAnalysisService:
         *,
         keyword: str | None = None,
         hs_code: str | None = None,
+        preloaded_signal: dict[str, Any] | None = None,
+        use_ai_summary: bool = True,
     ) -> MarketProfileAnalysisResponse:
         normalized_country = _normalize_country(country_code)
         normalized_category = _normalize_text(product_category)
         normalized_keyword = _normalize_optional_text(keyword)
         normalized_hs_code = _normalize_hs_code(hs_code) if hs_code else _infer_hs_code(normalized_category)
 
-        worldbank = await self._data_sources.get_market_profile(normalized_country)
-        trade = await self._data_sources.get_trade_data(
-            normalized_category,
-            hs_code=normalized_hs_code,
-            country=normalized_country,
-        )
+        worldbank = _preloaded_response(preloaded_signal, "market", WorldBankCountryResponse)
+        if worldbank is None:
+            worldbank = await self._data_sources.get_market_profile(normalized_country)
+        trade = _preloaded_response(preloaded_signal, "trade", UnComtradeTradeFlowResponse)
+        if trade is None:
+            trade = await self._data_sources.get_trade_data(
+                normalized_category,
+                hs_code=normalized_hs_code,
+                country=normalized_country,
+            )
         seed_profile = _market_profile_row(normalized_country, self._seed_dir) or {}
 
         scores = _score_market_profile(worldbank, trade, seed_profile, normalized_hs_code, self._seed_dir)
@@ -78,27 +86,41 @@ class MarketProfileAnalysisService:
         evidence = _evidence_payload(worldbank, trade, seed_profile, scores)
         sources = _market_sources(worldbank, trade, seed_profile)
 
-        summary, ai_fallback_used = await self._summary(
-            country_code=normalized_country,
-            product_category=normalized_category,
-            keyword=normalized_keyword,
-            hs_code=normalized_hs_code,
-            scores=scores,
-            competition_level=competition_level,
-            suitable_products=suitable_products,
-            evidence=evidence,
-            sources=sources,
-        )
-        sources.append(
-            AnalysisSource(
-                provider="bailian",
-                source_label="qwen3.6-plus" if not ai_fallback_used else "AI fallback template",
-                source_type=API_SOURCE if not ai_fallback_used else "ai_fallback",
-                fallback_used=ai_fallback_used,
-                api_invoked=not ai_fallback_used,
-                detail="Generated market profile summary explanation.",
+        if use_ai_summary:
+            summary, ai_fallback_used = await self._summary(
+                country_code=normalized_country,
+                product_category=normalized_category,
+                keyword=normalized_keyword,
+                hs_code=normalized_hs_code,
+                scores=scores,
+                competition_level=competition_level,
+                suitable_products=suitable_products,
+                evidence=evidence,
+                sources=sources,
             )
-        )
+            sources.append(
+                AnalysisSource(
+                    provider="bailian",
+                    source_label="qwen3.6-plus" if not ai_fallback_used else "AI fallback template",
+                    source_type=API_SOURCE if not ai_fallback_used else "ai_fallback",
+                    fallback_used=ai_fallback_used,
+                    api_invoked=not ai_fallback_used,
+                    detail="Generated market profile summary explanation.",
+                )
+            )
+        else:
+            summary = _fallback_summary(normalized_country, normalized_category, scores, competition_level, sources)
+            ai_fallback_used = False
+            sources.append(
+                AnalysisSource(
+                    provider="backend",
+                    source_label="Local deterministic market profile summary",
+                    source_type="local",
+                    fallback_used=False,
+                    api_invoked=False,
+                    detail="Workflow summary built from DataCollectionAgent raw signals without Qwen.",
+                )
+            )
 
         return MarketProfileAnalysisResponse(
             country_code=normalized_country,
@@ -175,20 +197,41 @@ class MarketProfileAnalysisService:
             "sources": [source.model_dump(mode="json") for source in sources],
         }
         try:
-            result = await self._ai_client.chat(
-                build_market_profile_summary_messages(payload),
-                temperature=0.3,
-                max_tokens=700,
-                json_mode=True,
+            result = await wait_for_qwen(
+                self._ai_client.chat(
+                    build_market_profile_summary_messages(payload),
+                    temperature=0.3,
+                    max_tokens=700,
+                    json_mode=True,
+                ),
+                timeout_seconds=DEFAULT_MARKET_PROFILE_QWEN_TIMEOUT_SECONDS,
             )
             parsed = parse_json_object(result.content)
             summary = parsed.get("summary")
             if isinstance(summary, str) and summary.strip():
                 return summary.strip(), False
-        except (BailianError, AiJsonParseError, ValueError, TypeError):
+        except (BailianError, AiJsonParseError, ValueError, TypeError, TimeoutError):
             mark_latest_qwen_fallback("market_profile_summary")
             pass
         return _fallback_summary(country_code, product_category, scores, competition_level, sources), True
+
+
+def _preloaded_response(
+    signal: dict[str, Any] | None,
+    key: str,
+    response_model: type[Any],
+) -> Any | None:
+    if not isinstance(signal, dict):
+        return None
+    value = signal.get(key)
+    if isinstance(value, response_model):
+        return value
+    if isinstance(value, dict):
+        try:
+            return response_model.model_validate(value)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _score_market_profile(

@@ -78,6 +78,9 @@ WORKFLOW_STATUS_FAILED = "failed"
 WORKFLOW_STATUS_FALLBACK_USED = "fallback_used"
 NEXT_PAGE_URL_TEMPLATE = "/reports?analysis_id={analysis_id}"
 OPTIONAL_PROVIDERS = {"ebay", "rakuten", "reddit"}
+DEFAULT_STEP_TIMEOUT_SECONDS = 15.0
+WORKFLOW_MARKETING_QWEN_TIMEOUT_SECONDS = 20.0
+WORKFLOW_REPORT_QWEN_TIMEOUT_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -319,7 +322,36 @@ class ExportInsightWorkflow:
         recorder = AnalysisPerformanceRecorder(context.state)
         try:
             with analysis_performance_scope(recorder, step.step_id):
-                result = await agent.run(context)
+                result = await asyncio.wait_for(agent.run(context), timeout=agent.timeout_seconds)
+        except TimeoutError:
+            self._db.rollback()
+            reason = f"{step.step_id}_hard_timeout"
+            recorder.record(
+                {
+                    "type": "workflow",
+                    "step_id": step.step_id,
+                    "provider": "export_insight_workflow",
+                    "endpoint": step.node,
+                    "status": "timeout",
+                    "started_at": started_at,
+                    "finished_at": _utc_now(),
+                    "duration_ms": max(0, round((perf_counter() - start) * 1000)),
+                    "timeout": True,
+                    "fallback_used": True,
+                    "fallback_reason": reason,
+                }
+            )
+            context.state.setdefault("workflow_timeouts", [])
+            context.state["workflow_timeouts"].append(
+                {
+                    "step_id": step.step_id,
+                    "node": step.node,
+                    "timeout_seconds": agent.timeout_seconds,
+                    "fallback_reason": reason,
+                    "recorded_at": _utc_now().isoformat(),
+                }
+            )
+            result = agent.timeout_result(context, reason)
         except WorkflowInputError as exc:
             message = redact_text(str(exc)) or "Workflow input failed."
             context.analysis_run.workflow_state = _persistable_state(context.state)
@@ -518,9 +550,17 @@ class ExportInsightWorkflow:
 
 class BaseWorkflowAgent:
     step: WorkflowStep
+    timeout_seconds: float = DEFAULT_STEP_TIMEOUT_SECONDS
 
     async def run(self, context: WorkflowContext) -> StepResult:
         raise NotImplementedError
+
+    def timeout_result(self, context: WorkflowContext, reason: str) -> StepResult:
+        return StepResult(
+            output_summary={"fallback_used": True, "fallback_reason": reason},
+            fallback_used=True,
+            fallback_reason=reason,
+        )
 
 
 class CompanyProfilingAgent(BaseWorkflowAgent):
@@ -630,6 +670,7 @@ class ProductUnderstandingAgent(BaseWorkflowAgent):
 
 class DataCollectionAgent(BaseWorkflowAgent):
     step = WORKFLOW_STEPS[2]
+    timeout_seconds = 45.0
 
     async def run(self, context: WorkflowContext) -> StepResult:
         raw_signals: dict[str, dict[str, Any]] = {}
@@ -904,6 +945,63 @@ class DataCollectionAgent(BaseWorkflowAgent):
                 )
                 return fallback(reason)
 
+    def timeout_result(self, context: WorkflowContext, reason: str) -> StepResult:
+        raw_signals: dict[str, dict[str, Any]] = {}
+        summaries: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
+        countries = [str(country).strip().upper() for country in context.request.target_countries]
+        products = [item for item in (context.state.get("product_profiles") or []) if isinstance(item, dict)]
+        for product in products:
+            keyword = str(product.get("keyword") or product.get("product_name_en") or product.get("product_name_cn") or "product")
+            hs_code = str(product.get("hs_code") or _infer_hs_code(str(product.get("category") or keyword)))
+            for country in countries:
+                signal_key = _product_country_key(int(product["id"]), country)
+                competitors = _empty_competitor_response(keyword, country)
+                content = _empty_content_response(keyword, country)
+                market = _empty_market_profile_response(country)
+                trade = _empty_trade_response(hs_code, country, fallback_reason="provider_timeout")
+                raw_signals[signal_key] = {
+                    "product": product,
+                    "country": country,
+                    "competitors": competitors,
+                    "content": content,
+                    "market": market,
+                    "trade": trade,
+                }
+                summaries.append(
+                    {
+                        "product_id": product["id"],
+                        "country": country,
+                        "competitor_items": 0,
+                        "content_items": 0,
+                        "market_indicators": 0,
+                        "trade_records": 0,
+                    }
+                )
+                sources.extend(
+                    [
+                        _source_from_response("etsy", competitors, "Etsy competitor search"),
+                        _source_from_response("data_source_service", content, "Unified content trends"),
+                        _source_from_response("worldbank", market, "World Bank market profile"),
+                        _source_from_response("un_comtrade", trade, "UN Comtrade trade data"),
+                    ]
+                )
+        return StepResult(
+            output_summary={
+                "provider_call_count": 0,
+                "cache_hit_count": 0,
+                "fallback_count": len(sources),
+                "timeout_count": 1,
+                "fallback_providers": ["data_source_service", "etsy", "un_comtrade", "worldbank"],
+                "fallback_reasons": ["provider_timeout"],
+                "record_count": 0,
+            },
+            state_updates={"raw_signals": raw_signals, "data_collection_summary": summaries},
+            sources=sources,
+            fallback_used=True,
+            fallback_reason=reason,
+        )
+
 
 class CompetitorAnalysisAgent(BaseWorkflowAgent):
     step = WORKFLOW_STEPS[3]
@@ -947,6 +1045,7 @@ class CompetitorAnalysisAgent(BaseWorkflowAgent):
 
 class MarketProfilingAgent(BaseWorkflowAgent):
     step = WORKFLOW_STEPS[4]
+    timeout_seconds = 20.0
 
     async def run(self, context: WorkflowContext) -> StepResult:
         service = MarketProfileAnalysisService(context.data_sources, ai_client=context.ai_client)
@@ -967,6 +1066,12 @@ class MarketProfilingAgent(BaseWorkflowAgent):
                     str(product.get("category") or product.get("keyword") or "product"),
                     keyword=str(product.get("keyword") or ""),
                     hs_code=str(product.get("hs_code") or ""),
+                    preloaded_signal=_raw_signal_for_product_country(
+                        context.state,
+                        int(product["id"]),
+                        str(country),
+                    ),
+                    use_ai_summary=False,
                 )
                 fallback_used = fallback_used or response.fallback_used
                 ai_fallback_used = ai_fallback_used or response.ai_fallback_used
@@ -998,6 +1103,7 @@ class MarketProfilingAgent(BaseWorkflowAgent):
 
 class ContentTrendAgent(BaseWorkflowAgent):
     step = WORKFLOW_STEPS[5]
+    timeout_seconds = 20.0
 
     async def run(self, context: WorkflowContext) -> StepResult:
         service = ContentTrendAnalysisService(context.data_sources, ai_client=context.ai_client)
@@ -1009,7 +1115,13 @@ class ContentTrendAgent(BaseWorkflowAgent):
         for product in context.state.get("product_profiles", []):
             keyword = str(product.get("keyword") or product.get("product_name_en") or product.get("product_name_cn"))
             for country in context.request.target_countries:
-                response = await service.analyze(keyword, country)
+                signal = _raw_signal_for_product_country(context.state, int(product["id"]), str(country))
+                response = await service.analyze(
+                    keyword,
+                    country,
+                    preloaded_content=signal.get("content") if isinstance(signal, dict) else None,
+                    use_ai_analysis=False,
+                )
                 fallback_used = fallback_used or response.fallback_used
                 ai_fallback_used = ai_fallback_used or response.ai_fallback_used
                 sources.extend([source.model_dump(mode="json") for source in response.sources])
@@ -1041,6 +1153,7 @@ class ContentTrendAgent(BaseWorkflowAgent):
 
 class OpportunityScoringAgent(BaseWorkflowAgent):
     step = WORKFLOW_STEPS[6]
+    timeout_seconds = 30.0
 
     async def run(self, context: WorkflowContext) -> StepResult:
         service = OpportunityScoringService(context.db, context.data_sources, ai_client=context.ai_client)
@@ -1053,6 +1166,8 @@ class OpportunityScoringAgent(BaseWorkflowAgent):
             ),
             analysis_run=context.analysis_run,
             final_status=None,
+            raw_signals=context.state.get("raw_signals") if isinstance(context.state.get("raw_signals"), dict) else None,
+            use_ai_explanations=False,
         )
         scoring_summary = ScoringSummary(
             item_count=response.item_count,
@@ -1077,6 +1192,7 @@ class OpportunityScoringAgent(BaseWorkflowAgent):
 
 class MarketingPrepAgent(BaseWorkflowAgent):
     step = WORKFLOW_STEPS[7]
+    timeout_seconds = 25.0
 
     async def run(self, context: WorkflowContext) -> StepResult:
         score_rows = _opportunity_scores(context.db, context.analysis_run.id)[:3]
@@ -1097,6 +1213,7 @@ class MarketingPrepAgent(BaseWorkflowAgent):
                     product=product,
                     target_language=target_language,
                     keywords=keywords,
+                    timeout_seconds=WORKFLOW_MARKETING_QWEN_TIMEOUT_SECONDS,
                 )
                 for row, product, target_language, keywords in asset_contexts
             )
@@ -1124,10 +1241,15 @@ class MarketingPrepAgent(BaseWorkflowAgent):
 
 class ReportPrepAgent(BaseWorkflowAgent):
     step = WORKFLOW_STEPS[8]
+    timeout_seconds = 25.0
 
     async def run(self, context: WorkflowContext) -> StepResult:
         try:
-            outcome = await ReportGenerator(context.db, ai_client=context.ai_client).generate_from_analysis(
+            outcome = await ReportGenerator(
+                context.db,
+                ai_client=context.ai_client,
+                ai_timeout_seconds=WORKFLOW_REPORT_QWEN_TIMEOUT_SECONDS,
+            ).generate_from_analysis(
                 context.analysis_run.id,
                 force_regenerate=False,
             )
@@ -1434,6 +1556,18 @@ def _infer_hs_code(text: str) -> str:
 
 def _product_country_key(product_id: int, country: str) -> str:
     return f"{product_id}:{country.upper()}"
+
+
+def _raw_signal_for_product_country(
+    state: dict[str, Any],
+    product_id: int,
+    country: str,
+) -> dict[str, Any] | None:
+    raw_signals = state.get("raw_signals")
+    if not isinstance(raw_signals, dict):
+        return None
+    signal = raw_signals.get(_product_country_key(product_id, country))
+    return signal if isinstance(signal, dict) else None
 
 
 def _data_collection_text_key(value: str) -> str:
@@ -1817,6 +1951,7 @@ async def _marketing_asset_for_score(
     product: Product,
     target_language: str,
     keywords: list[str],
+    timeout_seconds: float | None = None,
 ) -> tuple[dict[str, Any], bool]:
     fallback_used = False
     try:
@@ -1828,6 +1963,7 @@ async def _marketing_asset_for_score(
             target_language=target_language,
             keywords=keywords,
             selling_points=_selling_points_from_score(row),
+            timeout_seconds=timeout_seconds,
         )
     except (BailianError, AiJsonParseError, ValidationError, ValueError, TypeError, TimeoutError) as exc:
         mark_latest_qwen_fallback("marketing_copy_timeout" if is_timeout_error(exc) else "marketing_copy")
@@ -1854,6 +1990,7 @@ async def _marketing_copy(
     target_language: str,
     keywords: list[str],
     selling_points: list[str],
+    timeout_seconds: float | None = None,
 ) -> MarketingCopyResponse:
     payload = {
         "product_name": product_name,
@@ -1866,7 +2003,8 @@ async def _marketing_copy(
         "selling_points": selling_points,
     }
     result = await wait_for_qwen(
-        ai_client.chat(build_marketing_copy_messages(payload), temperature=0.5, max_tokens=1000, json_mode=True)
+        ai_client.chat(build_marketing_copy_messages(payload), temperature=0.5, max_tokens=1000, json_mode=True),
+        timeout_seconds=timeout_seconds,
     )
     return MarketingCopyResponse.model_validate(parse_json_object(result.content))
 
@@ -1924,7 +2062,10 @@ async def _report_section(
             "fallback_used_providers": state.get("fallback_used_providers"),
         },
     }
-    result = await ai_client.chat(build_report_section_messages(payload), temperature=0.4, max_tokens=900, json_mode=True)
+    result = await wait_for_qwen(
+        ai_client.chat(build_report_section_messages(payload), temperature=0.4, max_tokens=900, json_mode=True),
+        timeout_seconds=WORKFLOW_REPORT_QWEN_TIMEOUT_SECONDS,
+    )
     return ReportSectionResponse.model_validate(parse_json_object(result.content))
 
 

@@ -29,6 +29,7 @@ from app.schemas import (
 from app.services.ai import BailianClient, BailianError
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_opportunity_explanation_messages
+from app.services.ai.qwen_timeout import wait_for_qwen
 from app.services.analysis import analyze_competitors
 from app.services.analysis_performance import mark_latest_qwen_fallback
 from app.services.data_sources import DataSourceService
@@ -38,6 +39,7 @@ from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_SEED_DIR = PROJECT_ROOT / "data" / "seed"
 TARGET_COUNTRIES = ("US", "GB", "JP", "AU", "SG")
+DEFAULT_SCORING_QWEN_TIMEOUT_SECONDS = 20.0
 
 WEIGHTS = {
     "trend_score": Decimal("0.25"),
@@ -116,6 +118,8 @@ class OpportunityScoringService:
         *,
         analysis_run: AnalysisRun,
         final_status: str | None = "completed",
+        raw_signals: dict[str, dict[str, Any]] | None = None,
+        use_ai_explanations: bool = False,
     ) -> ScoringRunResponse:
         company = self._db.get(Company, request.company_id)
         if company is None:
@@ -145,6 +149,8 @@ class OpportunityScoringService:
                             keyword=keyword,
                             country=country,
                             competitor_limit=request.competitor_limit,
+                            raw_signal=_raw_signal_for(raw_signals, product.id, country),
+                            use_ai_explanations=use_ai_explanations,
                         )
                     )
 
@@ -238,15 +244,25 @@ class OpportunityScoringService:
         keyword: str,
         country: str,
         competitor_limit: int,
+        raw_signal: dict[str, Any] | None = None,
+        use_ai_explanations: bool = False,
     ) -> OpportunityScoreResult:
         normalized_country = country.strip().upper()
         product_category = product.category or keyword
         hs_code = _infer_hs_code(" ".join([product_category, keyword, product.description or ""]))
 
-        competitors = await self._data_sources.search_competitors(keyword, country=normalized_country, limit=competitor_limit)
-        content = await self._data_sources.get_content_trends(keyword, country=normalized_country, limit=30)
-        worldbank = await self._data_sources.get_market_profile(normalized_country)
-        trade = await self._data_sources.get_trade_data(product_category, hs_code=hs_code, country=normalized_country)
+        competitors = _signal_response(raw_signal, "competitors", DataSourceCompetitorSearchResponse)
+        if competitors is None:
+            competitors = await self._data_sources.search_competitors(keyword, country=normalized_country, limit=competitor_limit)
+        content = _signal_response(raw_signal, "content", DataSourceContentTrendResponse)
+        if content is None:
+            content = await self._data_sources.get_content_trends(keyword, country=normalized_country, limit=30)
+        worldbank = _signal_response(raw_signal, "market", WorldBankCountryResponse)
+        if worldbank is None:
+            worldbank = await self._data_sources.get_market_profile(normalized_country)
+        trade = _signal_response(raw_signal, "trade", UnComtradeTradeFlowResponse)
+        if trade is None:
+            trade = await self._data_sources.get_trade_data(product_category, hs_code=hs_code, country=normalized_country)
 
         competitor_analysis = analyze_competitors(
             keyword=keyword,
@@ -271,6 +287,7 @@ class OpportunityScoringService:
             worldbank=worldbank,
             trade=trade,
             ai_fallback_used=False,
+            include_ai_source=False,
         )
         evidence = _evidence_payload(
             product=product,
@@ -288,23 +305,39 @@ class OpportunityScoringService:
             trade=trade,
             deterministic_risks=deterministic_risks,
         )
-        explanation, ai_fallback_used = await self._explanation(
-            product=product,
-            keyword=keyword,
-            country=normalized_country,
-            scores=scores,
-            total_score=total_score,
-            competitor_analysis=competitor_analysis,
-            evidence=evidence,
-            sources=sources,
-            deterministic_risks=deterministic_risks,
-        )
+        if use_ai_explanations:
+            explanation, ai_fallback_used = await self._explanation(
+                product=product,
+                keyword=keyword,
+                country=normalized_country,
+                scores=scores,
+                total_score=total_score,
+                competitor_analysis=competitor_analysis,
+                evidence=evidence,
+                sources=sources,
+                deterministic_risks=deterministic_risks,
+            )
+            ai_invoked = not ai_fallback_used
+        else:
+            explanation = _fallback_explanation(
+                product=product,
+                keyword=keyword,
+                country=normalized_country,
+                scores=scores,
+                total_score=total_score,
+                competitor_analysis=competitor_analysis,
+                deterministic_risks=deterministic_risks,
+                sources=sources,
+            )
+            ai_fallback_used = False
+            ai_invoked = False
         sources = _sources_for_score(
             competitors=competitors,
             content=content,
             worldbank=worldbank,
             trade=trade,
             ai_fallback_used=ai_fallback_used,
+            ai_invoked=ai_invoked,
         )
         return OpportunityScoreResult(
             analysis_id=analysis_id,
@@ -365,16 +398,19 @@ class OpportunityScoringService:
             "deterministic_risks": deterministic_risks,
         }
         try:
-            result = await self._ai_client.chat(
-                build_opportunity_explanation_messages(payload),
-                temperature=0.3,
-                max_tokens=700,
-                json_mode=True,
+            result = await wait_for_qwen(
+                self._ai_client.chat(
+                    build_opportunity_explanation_messages(payload),
+                    temperature=0.3,
+                    max_tokens=700,
+                    json_mode=True,
+                ),
+                timeout_seconds=DEFAULT_SCORING_QWEN_TIMEOUT_SECONDS,
             )
             parsed = parse_json_object(result.content)
             explanation = OpportunityExplanation.model_validate(parsed)
             return _merge_deterministic_risks(explanation, deterministic_risks), False
-        except (BailianError, AiJsonParseError, ValidationError, ValueError, TypeError):
+        except (BailianError, AiJsonParseError, ValidationError, ValueError, TypeError, TimeoutError):
             mark_latest_qwen_fallback("opportunity_explanation")
             return fallback, True
 
@@ -541,52 +577,68 @@ def _sources_for_score(
     worldbank: WorldBankCountryResponse,
     trade: UnComtradeTradeFlowResponse,
     ai_fallback_used: bool,
+    ai_invoked: bool = True,
+    include_ai_source: bool = True,
 ) -> list[AnalysisSource]:
     competitor_detail = "Orchestrates Etsy API and competitor_samples.csv fallback; no eBay API is called."
-    return _dedupe_sources(
-        [
-            AnalysisSource(
-                provider="etsy",
-                source_label="Etsy API" if not competitors.fallback_used else "CSV fallback: competitor_samples.csv",
-                source_type=API_SOURCE if not competitors.fallback_used else CSV_FALLBACK_SOURCE,
-                fallback_used=competitors.fallback_used,
-                api_invoked=not competitors.fallback_used,
-                detail=competitor_detail,
-            ),
-            AnalysisSource(
-                provider="data_source_service",
-                source_label="Unified trend data",
-                source_type="mixed",
-                fallback_used=content.fallback_used,
-                api_invoked=any(item.source_type == API_SOURCE for item in content.items),
-                detail="Combines YouTube, GDELT, and content_trends.csv rows.",
-            ),
-            AnalysisSource(
-                provider="worldbank",
-                source_label="World Bank API" if not worldbank.fallback_used else "CSV fallback: market_profiles.csv",
-                source_type=API_SOURCE if not worldbank.fallback_used else CSV_FALLBACK_SOURCE,
-                fallback_used=worldbank.fallback_used,
-                api_invoked=not worldbank.fallback_used,
-                detail="Macroeconomic indicators.",
-            ),
-            AnalysisSource(
-                provider="un_comtrade",
-                source_label="UN Comtrade API" if not trade.fallback_used else "CSV fallback: trade_samples.csv",
-                source_type=API_SOURCE if not trade.fallback_used else CSV_FALLBACK_SOURCE,
-                fallback_used=trade.fallback_used,
-                api_invoked=not trade.fallback_used and trade.auth_mode != "fallback",
-                detail=f"Trade flow auth_mode={trade.auth_mode}.",
-            ),
-            AnalysisSource(
-                provider="bailian",
-                source_label="qwen3.6-plus" if not ai_fallback_used else "AI fallback template",
-                source_type=API_SOURCE if not ai_fallback_used else "ai_fallback",
-                fallback_used=ai_fallback_used,
-                api_invoked=not ai_fallback_used,
-                detail="Generates reason, risk, and next action only.",
-            ),
-        ]
-    )
+    sources = [
+        AnalysisSource(
+            provider="etsy",
+            source_label="Etsy API" if not competitors.fallback_used else "CSV fallback: competitor_samples.csv",
+            source_type=API_SOURCE if not competitors.fallback_used else CSV_FALLBACK_SOURCE,
+            fallback_used=competitors.fallback_used,
+            api_invoked=not competitors.fallback_used,
+            detail=competitor_detail,
+        ),
+        AnalysisSource(
+            provider="data_source_service",
+            source_label="Unified trend data",
+            source_type="mixed",
+            fallback_used=content.fallback_used,
+            api_invoked=any(item.source_type == API_SOURCE for item in content.items),
+            detail="Combines YouTube, GDELT, and content_trends.csv rows.",
+        ),
+        AnalysisSource(
+            provider="worldbank",
+            source_label="World Bank API" if not worldbank.fallback_used else "CSV fallback: market_profiles.csv",
+            source_type=API_SOURCE if not worldbank.fallback_used else CSV_FALLBACK_SOURCE,
+            fallback_used=worldbank.fallback_used,
+            api_invoked=not worldbank.fallback_used,
+            detail="Macroeconomic indicators.",
+        ),
+        AnalysisSource(
+            provider="un_comtrade",
+            source_label="UN Comtrade API" if not trade.fallback_used else "CSV fallback: trade_samples.csv",
+            source_type=API_SOURCE if not trade.fallback_used else CSV_FALLBACK_SOURCE,
+            fallback_used=trade.fallback_used,
+            api_invoked=not trade.fallback_used and trade.auth_mode != "fallback",
+            detail=f"Trade flow auth_mode={trade.auth_mode}.",
+        ),
+    ]
+    if include_ai_source:
+        if ai_invoked or ai_fallback_used:
+            sources.append(
+                AnalysisSource(
+                    provider="bailian",
+                    source_label="qwen3.6-plus" if not ai_fallback_used else "AI fallback template",
+                    source_type=API_SOURCE if not ai_fallback_used else "ai_fallback",
+                    fallback_used=ai_fallback_used,
+                    api_invoked=not ai_fallback_used,
+                    detail="Generates reason, risk, and next action only.",
+                )
+            )
+        else:
+            sources.append(
+                AnalysisSource(
+                    provider="backend",
+                    source_label="Local deterministic opportunity explanation",
+                    source_type="local",
+                    fallback_used=False,
+                    api_invoked=False,
+                    detail="Reason, risk, and next action generated from backend score evidence without Qwen.",
+                )
+            )
+    return _dedupe_sources(sources)
 
 
 def _evidence_payload(
@@ -887,6 +939,35 @@ def _dedupe_sources(sources: list[AnalysisSource]) -> list[AnalysisSource]:
             existing.fallback_used = existing.fallback_used or source.fallback_used
             existing.api_invoked = existing.api_invoked or source.api_invoked
     return list(deduped.values())
+
+
+def _raw_signal_for(
+    raw_signals: dict[str, dict[str, Any]] | None,
+    product_id: int,
+    country: str,
+) -> dict[str, Any] | None:
+    if not isinstance(raw_signals, dict):
+        return None
+    signal = raw_signals.get(f"{product_id}:{country.strip().upper()}")
+    return signal if isinstance(signal, dict) else None
+
+
+def _signal_response(
+    signal: dict[str, Any] | None,
+    key: str,
+    response_model: type[Any],
+) -> Any | None:
+    if not isinstance(signal, dict):
+        return None
+    value = signal.get(key)
+    if isinstance(value, response_model):
+        return value
+    if isinstance(value, dict):
+        try:
+            return response_model.model_validate(value)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _readable_dimension(value: str) -> str:

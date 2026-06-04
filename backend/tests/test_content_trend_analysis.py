@@ -11,7 +11,13 @@ from app.api.trends import get_content_trend_analysis_service
 from app.db.base import Base
 from app.main import app
 from app.models import ApiCallLog, DataSourceCache
-from app.schemas import AnalysisSource, ContentTrendAnalysisResponse, ContentTrendSourceItem
+from app.schemas import (
+    AnalysisSource,
+    ContentTrendAnalysisResponse,
+    ContentTrendSourceItem,
+    DataSourceContentTrendItem,
+    DataSourceContentTrendResponse,
+)
 from app.services.ai import BailianChatCompletion
 from app.services.analysis import ContentTrendAnalysisService
 from app.services.data_sources import DataSourceService
@@ -43,6 +49,51 @@ def test_content_trend_analysis_falls_back_to_csv_samples_and_discussions(db_ses
     providers = set(db_session.scalars(select(ApiCallLog.provider))) | set(db_session.scalars(select(DataSourceCache.provider)))
     assert "tiktok" not in providers
     assert "pinterest" not in providers
+
+
+def test_preloaded_content_signal_skips_provider_refetch_and_qwen(db_session: Session) -> None:
+    service = ContentTrendAnalysisService(
+        DataSourceService(
+            db_session,
+            youtube_provider=UnexpectedYoutubeProvider(),
+            gdelt_provider=UnexpectedGdeltProvider(),
+        ),
+        ai_client=UnexpectedAiClient(),
+    )
+    preloaded_content = DataSourceContentTrendResponse(
+        keyword="home decor",
+        country="US",
+        items=[
+            DataSourceContentTrendItem(
+                platform="YouTube",
+                country="US",
+                keyword="home decor",
+                title="Small room makeover",
+                heat_score=Decimal("86"),
+                summary="Before and after styling with washable textiles.",
+                content_style="room_makeover",
+                source_type="api",
+            )
+        ],
+        fallback_used=False,
+        sources=["YouTube"],
+    )
+
+    result = asyncio.run(
+        service.analyze(
+            "home decor",
+            "US",
+            preloaded_content=preloaded_content,
+            use_ai_analysis=False,
+        )
+    )
+
+    assert result.keyword == "home decor"
+    assert result.country == "US"
+    assert result.fallback_used is False
+    assert result.ai_fallback_used is False
+    assert result.content_themes
+    assert any(source.provider == "backend" and source.source_type == "local" for source in result.sources)
 
 
 def test_content_trend_api_route_maps_to_analysis_service() -> None:
@@ -88,6 +139,21 @@ class FailingGdeltProvider:
 class BadJsonAiClient:
     async def chat(self, *args: object, **kwargs: object) -> BailianChatCompletion:
         return BailianChatCompletion(content="not json", model="qwen3.6-plus")
+
+
+class UnexpectedYoutubeProvider:
+    async def search_videos(self, *args: object, **kwargs: object) -> object:
+        raise AssertionError("preloaded content should skip YouTube")
+
+
+class UnexpectedGdeltProvider:
+    async def search(self, *args: object, **kwargs: object) -> object:
+        raise AssertionError("preloaded content should skip GDELT")
+
+
+class UnexpectedAiClient:
+    async def chat(self, *args: object, **kwargs: object) -> BailianChatCompletion:
+        raise AssertionError("use_ai_analysis=False should skip Qwen")
 
 
 class StubContentTrendAnalysisService:

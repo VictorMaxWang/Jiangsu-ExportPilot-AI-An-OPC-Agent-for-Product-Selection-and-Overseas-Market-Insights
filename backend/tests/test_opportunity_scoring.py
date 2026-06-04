@@ -8,8 +8,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
-from app.models import ApiCallLog, Company, Product, ProductDraft, ProductImportJob
-from app.schemas import ScoringRunRequest
+from app.models import ApiCallLog, AnalysisRun, Company, Product, ProductDraft, ProductImportJob
+from app.schemas import (
+    DataSourceCompetitorItem,
+    DataSourceCompetitorSearchResponse,
+    DataSourceContentTrendItem,
+    DataSourceContentTrendResponse,
+    ScoringRunRequest,
+    UnComtradeTradeFlowResponse,
+    UnComtradeTradeRecord,
+    WorldBankCountryResponse,
+    WorldBankIndicatorItem,
+)
 from app.services.ai import BailianChatCompletion, BailianConfigurationError
 from app.services.data_sources import DataSourceService
 from app.services.scoring import OpportunityScoringService
@@ -135,7 +145,7 @@ def test_too_low_price_adds_risk_note(db_session: Session) -> None:
     assert "far below the competitor band" in result.items[0].risk
 
 
-def test_qwen_only_explains_does_not_override_scores(db_session: Session) -> None:
+def test_default_scoring_uses_deterministic_explanation_without_qwen(db_session: Session) -> None:
     product = _create_product(db_session)
     service = _service(db_session, ai_client=ScoreInjectingAiClient())
 
@@ -151,11 +161,52 @@ def test_qwen_only_explains_does_not_override_scores(db_session: Session) -> Non
 
     item = result.items[0]
     assert item.total_score != Decimal("999.00")
-    assert item.ai_fallback_used is True
+    assert item.ai_fallback_used is False
     assert item.reason != "Injected reason"
+    assert item.reason
 
 
-def test_ai_failure_keeps_rule_scores_and_uses_fallback_explanation(db_session: Session) -> None:
+def test_scoring_reuses_raw_signals_and_does_not_call_qwen_per_row(db_session: Session) -> None:
+    product = _create_product(db_session)
+    analysis_run = AnalysisRun(
+        company_id=product.company_id,
+        status="running",
+        input_products=[],
+        target_countries=["US", "JP"],
+    )
+    db_session.add(analysis_run)
+    db_session.commit()
+    db_session.refresh(analysis_run)
+    ai_client = CountingAiClient()
+    service = _service(db_session, ai_client=ai_client)
+    raw_signals = {
+        f"{product.id}:US": _raw_signal(product, "US"),
+        f"{product.id}:JP": _raw_signal(product, "JP"),
+    }
+
+    result = asyncio.run(
+        service.run_for_analysis(
+            ScoringRunRequest(
+                company_id=product.company_id,
+                product_ids=[product.id],
+                target_countries=["US", "JP"],
+                competitor_limit=20,
+            ),
+            analysis_run=analysis_run,
+            final_status=None,
+            raw_signals=raw_signals,
+            use_ai_explanations=False,
+        )
+    )
+
+    assert result.item_count == 2
+    assert all(item.total_score > 0 for item in result.items)
+    assert all(item.ai_fallback_used is False for item in result.items)
+    assert ai_client.calls == 0
+    assert list(db_session.scalars(select(ApiCallLog.provider))) == []
+
+
+def test_ai_failure_keeps_rule_scores_and_uses_deterministic_explanation(db_session: Session) -> None:
     product = _create_product(db_session)
     service = _service(db_session, ai_client=FailingAiClient())
 
@@ -171,7 +222,7 @@ def test_ai_failure_keeps_rule_scores_and_uses_fallback_explanation(db_session: 
 
     item = result.items[0]
     assert item.total_score > 0
-    assert item.ai_fallback_used is True
+    assert item.ai_fallback_used is False
     assert item.reason
     assert item.next_action
 
@@ -286,6 +337,15 @@ class ScoreInjectingAiClient:
         )
 
 
+class CountingAiClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, *args: object, **kwargs: object) -> BailianChatCompletion:
+        self.calls += 1
+        return BailianChatCompletion(content="{}", model="qwen3.6-plus")
+
+
 def _service(db: Session, *, ai_client: object) -> OpportunityScoringService:
     data_sources = DataSourceService(
         db,
@@ -296,6 +356,97 @@ def _service(db: Session, *, ai_client: object) -> OpportunityScoringService:
         etsy_provider=FailingEtsyProvider(),
     )
     return OpportunityScoringService(db, data_sources, ai_client=ai_client)
+
+
+def _raw_signal(product: Product, country: str) -> dict[str, object]:
+    keyword = product.product_name_en or product.product_name_cn
+    return {
+        "product": {
+            "id": product.id,
+            "product_name_cn": product.product_name_cn,
+            "product_name_en": product.product_name_en,
+            "category": product.category,
+            "keyword": keyword,
+            "hs_code": "630140",
+        },
+        "country": country,
+        "competitors": DataSourceCompetitorSearchResponse(
+            keyword=keyword,
+            country=country,
+            items=[
+                DataSourceCompetitorItem(
+                    platform="Etsy",
+                    country=country,
+                    keyword=keyword,
+                    title=f"{keyword} competitor",
+                    price=Decimal("45"),
+                    currency="USD" if country == "US" else "JPY",
+                    source_type="api",
+                )
+            ],
+            fallback_used=False,
+            sources=["Etsy"],
+        ),
+        "content": DataSourceContentTrendResponse(
+            keyword=keyword,
+            country=country,
+            items=[
+                DataSourceContentTrendItem(
+                    platform="YouTube",
+                    country=country,
+                    keyword=keyword,
+                    title=f"{keyword} styling",
+                    heat_score=Decimal("72"),
+                    source_type="api",
+                )
+            ],
+            fallback_used=False,
+            sources=["YouTube"],
+        ),
+        "market": WorldBankCountryResponse(
+            country_code=country,
+            indicators=[
+                WorldBankIndicatorItem(
+                    indicator_code="NY.GDP.PCAP.CD",
+                    indicator_name="GDP per capita",
+                    year=2025,
+                    value=55000,
+                    source="api",
+                ),
+                WorldBankIndicatorItem(
+                    indicator_code="SP.POP.TOTL",
+                    indicator_name="Population",
+                    year=2025,
+                    value=100000000,
+                    source="api",
+                ),
+                WorldBankIndicatorItem(
+                    indicator_code="IT.NET.USER.ZS",
+                    indicator_name="Internet users",
+                    year=2025,
+                    value=90,
+                    source="api",
+                ),
+            ],
+            fallback_used=False,
+        ),
+        "trade": UnComtradeTradeFlowResponse(
+            hs_code="630140",
+            reporter="CHN",
+            partner=country,
+            flow="export",
+            records=[
+                UnComtradeTradeRecord(
+                    year=2024,
+                    trade_value_usd=Decimal("100000000"),
+                    quantity=Decimal("1000"),
+                    source="api",
+                )
+            ],
+            fallback_used=False,
+            auth_mode="no_key",
+        ),
+    }
 
 
 def _create_company(db: Session) -> Company:

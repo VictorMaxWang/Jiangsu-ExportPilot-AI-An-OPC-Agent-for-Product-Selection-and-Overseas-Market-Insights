@@ -9,7 +9,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.api.markets import get_market_profile_analysis_service
 from app.db.base import Base
 from app.main import app
-from app.schemas import AnalysisSource, MarketCompareResponse, MarketProfileAnalysisResponse, SuitableProductItem
+from app.schemas import (
+    AnalysisSource,
+    MarketCompareResponse,
+    MarketProfileAnalysisResponse,
+    SuitableProductItem,
+    UnComtradeTradeFlowResponse,
+    UnComtradeTradeRecord,
+    WorldBankCountryResponse,
+    WorldBankIndicatorItem,
+)
 from app.services.ai import BailianConfigurationError
 from app.services.analysis import MarketProfileAnalysisService
 from app.services.data_sources import DataSourceService
@@ -80,6 +89,79 @@ def test_compare_defaults_to_five_target_countries_and_sorts(db_session: Session
     assert sort_scores == sorted(sort_scores, reverse=True)
 
 
+def test_preloaded_market_signal_skips_provider_refetch_and_qwen(db_session: Session) -> None:
+    service = MarketProfileAnalysisService(
+        DataSourceService(
+            db_session,
+            worldbank_provider=UnexpectedWorldBankProvider(),
+            un_comtrade_provider=UnexpectedUnComtradeProvider(),
+        ),
+        ai_client=UnexpectedAiClient(),
+    )
+    preloaded_signal = {
+        "market": WorldBankCountryResponse(
+            country_code="US",
+            indicators=[
+                WorldBankIndicatorItem(
+                    indicator_code="NY.GDP.PCAP.CD",
+                    indicator_name="GDP per capita",
+                    year=2025,
+                    value=65000,
+                    source="api",
+                ),
+                WorldBankIndicatorItem(
+                    indicator_code="SP.POP.TOTL",
+                    indicator_name="Population",
+                    year=2025,
+                    value=330000000,
+                    source="api",
+                ),
+                WorldBankIndicatorItem(
+                    indicator_code="IT.NET.USER.ZS",
+                    indicator_name="Internet users",
+                    year=2025,
+                    value=91,
+                    source="api",
+                ),
+            ],
+            fallback_used=False,
+        ),
+        "trade": UnComtradeTradeFlowResponse(
+            hs_code="630140",
+            reporter="CHN",
+            partner="US",
+            flow="export",
+            records=[
+                UnComtradeTradeRecord(
+                    year=2024,
+                    trade_value_usd=Decimal("100000000"),
+                    quantity=Decimal("1000"),
+                    source="api",
+                )
+            ],
+            fallback_used=False,
+            auth_mode="no_key",
+        ),
+    }
+
+    result = asyncio.run(
+        service.analyze_country(
+            "US",
+            "home textile",
+            keyword="boho blanket",
+            hs_code="630140",
+            preloaded_signal=preloaded_signal,
+            use_ai_summary=False,
+        )
+    )
+
+    assert result.country_code == "US"
+    assert result.fallback_used is False
+    assert result.ai_fallback_used is False
+    assert result.summary
+    assert any(source.provider == "backend" and source.source_type == "local" for source in result.sources)
+
+
 def test_market_api_routes_map_to_analysis_service() -> None:
     stub = StubMarketProfileAnalysisService()
     app.dependency_overrides[get_market_profile_analysis_service] = lambda: stub
@@ -124,6 +206,21 @@ class FailingUnComtradeProvider:
 class FailingAiClient:
     async def chat(self, *args: object, **kwargs: object) -> object:
         raise BailianConfigurationError("Bailian API key is not configured on backend.")
+
+
+class UnexpectedWorldBankProvider:
+    async def fetch_country(self, _country_code: str) -> object:
+        raise AssertionError("preloaded market signal should skip World Bank")
+
+
+class UnexpectedUnComtradeProvider:
+    async def get_trade_flow(self, *args: object, **kwargs: object) -> object:
+        raise AssertionError("preloaded market signal should skip UN Comtrade")
+
+
+class UnexpectedAiClient:
+    async def chat(self, *args: object, **kwargs: object) -> object:
+        raise AssertionError("use_ai_summary=False should skip Qwen")
 
 
 class StubMarketProfileAnalysisService:

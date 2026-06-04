@@ -16,6 +16,7 @@ from app.schemas import (
 from app.services.ai import BailianClient, BailianError
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_content_trend_analysis_messages
+from app.services.ai.qwen_timeout import wait_for_qwen
 from app.services.analysis_performance import mark_latest_qwen_fallback
 from app.services.data_sources import DataSourceService
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
@@ -24,6 +25,7 @@ from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_SEED_DIR = PROJECT_ROOT / "data" / "seed"
 SAMPLE_ONLY_PLATFORMS = {"TikTok Sample", "Pinterest Sample"}
+DEFAULT_CONTENT_TREND_QWEN_TIMEOUT_SECONDS = 20.0
 
 
 class ContentTrendAnalysisService:
@@ -38,10 +40,20 @@ class ContentTrendAnalysisService:
         self._ai_client = ai_client or BailianClient()
         self._seed_dir = seed_dir or DEFAULT_SEED_DIR
 
-    async def analyze(self, keyword: str, country: str) -> ContentTrendAnalysisResponse:
+    async def analyze(
+        self,
+        keyword: str,
+        country: str,
+        *,
+        preloaded_content: DataSourceContentTrendResponse | dict[str, Any] | None = None,
+        use_ai_analysis: bool = True,
+    ) -> ContentTrendAnalysisResponse:
         normalized_keyword = _normalize_text(keyword)
         normalized_country = _normalize_country(country)
-        data_response, service_failed = await self._trend_data(normalized_keyword, normalized_country)
+        data_response = _preloaded_content_response(preloaded_content)
+        service_failed = False
+        if data_response is None:
+            data_response, service_failed = await self._trend_data(normalized_keyword, normalized_country)
         source_items = _source_items_from_response(data_response)
         source_items.extend(_discussion_source_items(normalized_keyword, normalized_country, self._seed_dir))
 
@@ -54,13 +66,19 @@ class ContentTrendAnalysisService:
         source_items = source_items[:40]
 
         fallback_analysis = _deterministic_analysis(normalized_keyword, normalized_country, source_items, service_failed)
-        ai_analysis, ai_fallback_used = await self._ai_analysis(
-            normalized_keyword,
-            normalized_country,
-            source_items,
-            fallback_analysis,
-        )
-        sources = _trend_sources(source_items, data_response, service_failed, ai_fallback_used)
+        if use_ai_analysis:
+            ai_analysis, ai_fallback_used = await self._ai_analysis(
+                normalized_keyword,
+                normalized_country,
+                source_items,
+                fallback_analysis,
+            )
+            ai_invoked = not ai_fallback_used
+        else:
+            ai_analysis = fallback_analysis
+            ai_fallback_used = False
+            ai_invoked = False
+        sources = _trend_sources(source_items, data_response, service_failed, ai_fallback_used, ai_invoked=ai_invoked)
         return ContentTrendAnalysisResponse(
             keyword=normalized_keyword,
             country=normalized_country,
@@ -103,17 +121,33 @@ class ContentTrendAnalysisService:
             "fallback_analysis": fallback_analysis,
         }
         try:
-            result = await self._ai_client.chat(
-                build_content_trend_analysis_messages(payload),
-                temperature=0.4,
-                max_tokens=1200,
-                json_mode=True,
+            result = await wait_for_qwen(
+                self._ai_client.chat(
+                    build_content_trend_analysis_messages(payload),
+                    temperature=0.4,
+                    max_tokens=1200,
+                    json_mode=True,
+                ),
+                timeout_seconds=DEFAULT_CONTENT_TREND_QWEN_TIMEOUT_SECONDS,
             )
             parsed = parse_json_object(result.content)
             return _validated_analysis(parsed, fallback_analysis), False
-        except (BailianError, AiJsonParseError, ValueError, TypeError):
+        except (BailianError, AiJsonParseError, ValueError, TypeError, TimeoutError):
             mark_latest_qwen_fallback("content_trend_analysis")
             return fallback_analysis, True
+
+
+def _preloaded_content_response(
+    value: DataSourceContentTrendResponse | dict[str, Any] | None,
+) -> DataSourceContentTrendResponse | None:
+    if isinstance(value, DataSourceContentTrendResponse):
+        return value
+    if isinstance(value, dict):
+        try:
+            return DataSourceContentTrendResponse.model_validate(value)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _source_items_from_response(response: DataSourceContentTrendResponse) -> list[ContentTrendSourceItem]:
@@ -277,6 +311,8 @@ def _trend_sources(
     response: DataSourceContentTrendResponse,
     service_failed: bool,
     ai_fallback_used: bool,
+    *,
+    ai_invoked: bool = True,
 ) -> list[AnalysisSource]:
     sources: dict[tuple[str, str, str], AnalysisSource] = {}
     for item in source_items:
@@ -305,14 +341,24 @@ def _trend_sources(
         api_invoked=any(item.api_invoked for item in source_items),
         detail="Orchestrates YouTube, GDELT, and CSV fallback trend rows.",
     )
-    sources[("bailian", "qwen3.6-plus" if not ai_fallback_used else "AI fallback template", "api")] = AnalysisSource(
-        provider="bailian",
-        source_label="qwen3.6-plus" if not ai_fallback_used else "AI fallback template",
-        source_type=API_SOURCE if not ai_fallback_used else "ai_fallback",
-        fallback_used=ai_fallback_used,
-        api_invoked=not ai_fallback_used,
-        detail="Structured trend interpretation.",
-    )
+    if ai_invoked or ai_fallback_used:
+        sources[("bailian", "qwen3.6-plus" if not ai_fallback_used else "AI fallback template", "api")] = AnalysisSource(
+            provider="bailian",
+            source_label="qwen3.6-plus" if not ai_fallback_used else "AI fallback template",
+            source_type=API_SOURCE if not ai_fallback_used else "ai_fallback",
+            fallback_used=ai_fallback_used,
+            api_invoked=not ai_fallback_used,
+            detail="Structured trend interpretation.",
+        )
+    else:
+        sources[("backend", "Local deterministic trend analysis", "local")] = AnalysisSource(
+            provider="backend",
+            source_label="Local deterministic trend analysis",
+            source_type="local",
+            fallback_used=False,
+            api_invoked=False,
+            detail="Workflow trend interpretation built from DataCollectionAgent raw signals without Qwen.",
+        )
     return list(sources.values())
 
 

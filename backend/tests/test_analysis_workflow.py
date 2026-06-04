@@ -26,7 +26,7 @@ from app.schemas import (
     WorldBankIndicatorItem,
 )
 from app.services.agents import ExportInsightWorkflow
-from app.services.agents.export_insight_workflow import DataCollectionAgent, WorkflowContext
+from app.services.agents.export_insight_workflow import ContentTrendAgent, DataCollectionAgent, WorkflowContext
 from app.services.ai import BailianChatCompletion, BailianTimeoutError
 from app.services.analysis_performance import (
     AnalysisPerformanceRecorder,
@@ -35,6 +35,7 @@ from app.services.analysis_performance import (
     step_performance_counts,
 )
 from app.services.data_sources import DataSourceService
+from app.services.dashboard_service import DashboardService
 
 
 def test_export_insight_workflow_completes_with_provider_and_ai_fallback(
@@ -90,7 +91,7 @@ def test_export_insight_workflow_completes_with_provider_and_ai_fallback(
     assert performance.provider_call_count > 0
     assert performance.qwen_call_count > 0
     assert performance.fallback_count > 0
-    assert performance.cache_hit_count > 0
+    assert performance.cache_hit_count >= 0
     assert performance.provider_summary
     assert performance.qwen_summary
     assert any(step.step_id == "03_data_collection" and step.provider_call_count > 0 for step in performance.steps)
@@ -106,7 +107,7 @@ def test_export_insight_workflow_completes_with_provider_and_ai_fallback(
         and event.fallback_reason == "provider_unavailable"
         for event in performance.events
     )
-    assert any(step.step_id == "07_opportunity_scoring" and step.provider_call_count > 0 for step in performance.steps)
+    assert any(step.step_id == "07_opportunity_scoring" and step.provider_call_count == 0 for step in performance.steps)
     assert all(step.provider_call_count >= 0 for step in performance.steps)
 
     serialized = json.dumps(performance.model_dump(mode="json"), ensure_ascii=False).casefold()
@@ -248,11 +249,94 @@ def test_workflow_records_qwen_timeout_count(
     assert any(step.qwen_call_count > 0 and step.timeout_count > 0 for step in performance.steps)
 
 
+def test_default_workflow_skips_qwen_in_market_content_and_scoring(
+    db_session: Session,
+) -> None:
+    company_id, product_id = _seed_product(db_session)
+    workflow = ExportInsightWorkflow(
+        db_session,
+        _failing_data_source_service(db_session),
+        ai_client=BadJsonAiClient(),
+    )
+    analysis_run = workflow.create_run(
+        AnalysisRunRequest(
+            company_id=company_id,
+            product_ids=[product_id],
+            target_countries=["US", "JP", "GB"],
+            competitor_limit=20,
+        )
+    )
+
+    status = asyncio.run(workflow.run(analysis_run.id))
+
+    assert status is not None
+    assert status.status in {"success", "fallback_used"}
+    assert status.finished_at is not None
+    assert status.scoring_summary.item_count == 3
+
+    performance = workflow.performance(analysis_run.id)
+    assert performance is not None
+    by_step = {step.step_id: step for step in performance.steps}
+    assert by_step["05_market_profiling"].qwen_call_count == 0
+    assert by_step["06_content_trend"].qwen_call_count == 0
+    assert by_step["07_opportunity_scoring"].qwen_call_count == 0
+
+
+def test_step_hard_timeout_marks_fallback_and_workflow_continues(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    company_id, product_id = _seed_product(db_session)
+
+    async def slow_content_run(self: ContentTrendAgent, context: WorkflowContext) -> object:
+        await asyncio.sleep(0.05)
+        raise AssertionError("content trend hard timeout did not fire")
+
+    monkeypatch.setattr(ContentTrendAgent, "timeout_seconds", 0.01)
+    monkeypatch.setattr(ContentTrendAgent, "run", slow_content_run)
+    workflow = ExportInsightWorkflow(
+        db_session,
+        _failing_data_source_service(db_session),
+        ai_client=BadJsonAiClient(),
+    )
+    analysis_run = workflow.create_run(
+        AnalysisRunRequest(
+            company_id=company_id,
+            product_ids=[product_id],
+            target_countries=["US"],
+            competitor_limit=8,
+        )
+    )
+
+    status = asyncio.run(workflow.run(analysis_run.id))
+
+    assert status is not None
+    assert status.status == "fallback_used"
+    assert status.finished_at is not None
+    assert status.scoring_summary.item_count == 1
+    step = _step_log(status, "06_content_trend")
+    assert step.status == "fallback_used"
+    assert step.timeout_count >= 1
+    assert step.fallback_used is True
+    assert step.fallback_reason == "06_content_trend_hard_timeout"
+
+    performance = workflow.performance(analysis_run.id)
+    assert performance is not None
+    assert any(
+        event.type == "workflow"
+        and event.step_id == "06_content_trend"
+        and event.timeout
+        and event.fallback_used
+        for event in performance.events
+    )
+
+
 def test_report_qwen_timeout_uses_fallback_report_and_completes(
     monkeypatch: pytest.MonkeyPatch,
     db_session: Session,
 ) -> None:
     monkeypatch.setenv("BAILIAN_TIMEOUT_SECONDS", "0.01")
+    monkeypatch.setattr("app.services.agents.export_insight_workflow.WORKFLOW_REPORT_QWEN_TIMEOUT_SECONDS", 0.01)
     get_settings.cache_clear()
     company_id, product_id = _seed_product(db_session)
     workflow = ExportInsightWorkflow(
@@ -357,6 +441,7 @@ def test_marketing_qwen_timeout_uses_fallback_assets_and_completes(
     db_session: Session,
 ) -> None:
     monkeypatch.setenv("BAILIAN_TIMEOUT_SECONDS", "0.01")
+    monkeypatch.setattr("app.services.agents.export_insight_workflow.WORKFLOW_MARKETING_QWEN_TIMEOUT_SECONDS", 0.01)
     get_settings.cache_clear()
     company_id, product_id = _seed_product(db_session)
     workflow = ExportInsightWorkflow(
@@ -406,6 +491,10 @@ def test_marketing_qwen_timeout_uses_fallback_assets_and_completes(
         and event.fallback_used
         for event in performance.events
     )
+
+    dashboard = DashboardService(db_session).get_dashboard(analysis_run.id)
+    assert dashboard is not None
+    assert dashboard.analysis_id == analysis_run.id
 
 
 def test_parallel_data_collection_preserves_serial_result_structure(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import json
 from collections.abc import Callable, Coroutine
@@ -33,7 +34,7 @@ from app.schemas import (
     WorldBankIndicatorItem,
     YoutubeSearchResponse,
 )
-from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
+from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE, DEFAULT_PROVIDER_TIMEOUT_SECONDS
 from app.services.providers.etsy import EtsyProvider, clamp_limit as clamp_etsy_limit
 from app.services.providers.gdelt import GdeltProvider
 from app.services.providers.un_comtrade import UnComtradeProvider
@@ -56,6 +57,7 @@ GLOBAL_COUNTRY = "GLOBAL"
 DEFAULT_COUNTRY = "US"
 DEFAULT_TRADE_START_YEAR = 2020
 DEFAULT_TRADE_END_YEAR = 2024
+DATA_SOURCE_CALL_TIMEOUT_SECONDS = DEFAULT_PROVIDER_TIMEOUT_SECONDS + 1.0
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -415,9 +417,10 @@ class DataSourceService:
             return cached
 
         try:
-            response = await producer()
+            response = await asyncio.wait_for(producer(), timeout=DATA_SOURCE_CALL_TIMEOUT_SECONDS)
         except Exception as exc:
             timeout = is_timeout_error(exc)
+            fallback_reason = "provider_timeout" if timeout else "provider_unavailable"
             record_provider_call(
                 provider=provider,
                 endpoint=endpoint,
@@ -426,8 +429,18 @@ class DataSourceService:
                 duration_ms=_elapsed_ms(start),
                 timeout=timeout,
                 country=country_key,
+                fallback_reason=fallback_reason,
             )
-            raise
+            fallback = _fallback_response_for_call(
+                response_model=response_model,
+                query_key=query_key,
+                country_key=country_key,
+                seed_dir=self._seed_dir,
+                fallback_reason=fallback_reason,
+            )
+            if fallback is None:
+                raise
+            response = fallback
 
         fallback_used = bool(getattr(response, "fallback_used", False))
         fallback_reason = _response_fallback_reason(response)
@@ -557,6 +570,49 @@ class DataSourceService:
 
 def get_data_source_service(db: Session = Depends(get_db)) -> DataSourceService:
     return DataSourceService(db)
+
+
+def _fallback_response_for_call(
+    *,
+    response_model: type[T],
+    query_key: str,
+    country_key: str,
+    seed_dir: Path,
+    fallback_reason: str,
+) -> T | None:
+    country = None if country_key == GLOBAL_COUNTRY else country_key
+    if response_model is WorldBankCountryResponse:
+        return _fallback_market_profile(country_key, seed_dir)  # type: ignore[return-value]
+    if response_model is GdeltSearchResponse:
+        return _fallback_gdelt_search(query_key, country, 50, seed_dir)  # type: ignore[return-value]
+    if response_model is YoutubeSearchResponse:
+        return _fallback_youtube_search(query_key, country_key, MAX_YOUTUBE_RESULTS, seed_dir)  # type: ignore[return-value]
+    if response_model is DataSourceCompetitorSearchResponse:
+        return _fallback_competitor_search(query_key, country_key, 50, seed_dir)  # type: ignore[return-value]
+    if response_model is UnComtradeTradeFlowResponse:
+        hs_code = _hs_code_from_trade_query(query_key)
+        return _fallback_trade_data(
+            "product",
+            hs_code,
+            country_key,
+            seed_dir,
+            fallback_reason=fallback_reason,
+        )  # type: ignore[return-value]
+    if response_model is DataSourceContentTrendResponse:
+        return DataSourceContentTrendResponse(
+            keyword=query_key,
+            country=country,
+            items=_fallback_content_trend_items(query_key, country, 50, seed_dir),
+            fallback_used=True,
+            sources=["CSV fallback"],
+        )  # type: ignore[return-value]
+    return None
+
+
+def _hs_code_from_trade_query(query_key: str) -> str:
+    if query_key.startswith("hs:"):
+        return query_key.split("|", 1)[0].removeprefix("hs:") or "TOTAL"
+    return "TOTAL"
 
 
 def _fallback_market_profile(country_code: str, seed_dir: Path) -> WorldBankCountryResponse:

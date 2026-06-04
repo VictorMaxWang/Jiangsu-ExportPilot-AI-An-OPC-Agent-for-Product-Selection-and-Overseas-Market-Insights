@@ -348,6 +348,34 @@ def test_un_comtrade_timeout_records_fallback_reason_and_cache_event(db_session:
     assert counts["fallback_count"] == 2
 
 
+def test_service_level_provider_deadline_records_timeout_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    monkeypatch.setattr("app.services.data_sources.service.DATA_SOURCE_CALL_TIMEOUT_SECONDS", 0.01)
+    service = DataSourceService(db_session, youtube_provider=SlowYoutubeProvider())
+    state: dict[str, object] = {}
+
+    async def run_call() -> None:
+        with analysis_performance_scope(AnalysisPerformanceRecorder(state), "data_collection"):
+            result = await service.search_video_trends("home decor", country="US")
+            assert result.fallback_used is True
+            assert result.items
+
+    asyncio.run(run_call())
+
+    events = [event for event in get_performance_events(state) if event.get("type") == "provider"]
+    assert any(
+        event["provider"] == "youtube"
+        and event["status"] == "timeout"
+        and event["timeout"] is True
+        and event["fallback_reason"] == "provider_timeout"
+        for event in events
+    )
+    assert any(event["provider"] == "youtube" and event["status"] == "fallback" for event in events)
+    assert _cache_providers(db_session) == {"youtube"}
+
+
 def test_content_trends_survives_provider_failures(db_session: Session) -> None:
     service = DataSourceService(
         db_session,
@@ -457,6 +485,17 @@ class LiveYoutubeProvider:
             ],
             fallback_used=False,
         )
+
+
+class SlowYoutubeProvider:
+    async def search_videos(
+        self,
+        keyword: str,
+        country: str = "US",
+        max_results: int = 10,
+    ) -> YoutubeSearchResponse:
+        await asyncio.sleep(0.05)
+        return YoutubeSearchResponse(keyword=keyword, country=country, items=[], fallback_used=False)
 
 
 class FailingEtsyProvider:
