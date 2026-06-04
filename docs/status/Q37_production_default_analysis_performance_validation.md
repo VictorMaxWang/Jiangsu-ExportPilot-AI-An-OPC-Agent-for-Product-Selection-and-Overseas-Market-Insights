@@ -41,6 +41,17 @@ SSH reachability was tested with batch-mode authentication only. Both host forms
 
 Local SSH inspection found no private key under `$HOME\.ssh`, and `ssh-agent` was not running. No `.env`, key, cookie, admin password, database URL, or management password was read or printed.
 
+Second access audit at `2026-06-04 08:45 +08:00`:
+
+| Check | Result |
+| --- | --- |
+| `ssh root@opc.ankangyu.cn "cd /opt/supinzhihang && git rev-parse --short HEAD"` | Blocked: permission denied for available SSH identity. |
+| `ssh root@110.42.218.147 "cd /opt/supinzhihang && git rev-parse --short HEAD"` | Blocked: permission denied for available SSH identity. |
+| GitHub workflows | Only `.github/workflows/ci.yml` exists; no deploy workflow is configured. |
+| GitHub repository secrets metadata | No repository secrets were listed by `gh secret list`. |
+| Latest GitHub Actions run metadata | Completed with `failure`, but the jobs endpoint returned `total_count=0`, so no failed-job log was available to inspect. |
+| Public production health | `GET /health` returned `{"status":"ok","service":"supinzhihang-backend"}`. |
+
 ## Production smoke results
 
 Post-deploy production smoke was not run because deployment did not complete.
