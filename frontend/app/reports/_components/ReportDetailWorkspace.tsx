@@ -102,7 +102,7 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
         router.push(`/reports/${regenerated.id}`);
       }
     } catch (requestError) {
-      setError(getFriendlyErrorMessage(requestError));
+      setError(withReportRetryMessage(getFriendlyErrorMessage(requestError)));
     } finally {
       setRegenerating(false);
     }
@@ -231,4 +231,8 @@ function formatScore(value: string | number | null | undefined): string {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed.toFixed(1) : String(value);
+}
+
+function withReportRetryMessage(message: string): string {
+  return message.includes("可重新生成报告") ? message : `报告生成失败，可重新生成报告。${message}`;
 }

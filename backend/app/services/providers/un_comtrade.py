@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,7 +14,13 @@ import httpx
 from app.core.config import Settings, get_settings
 from app.schemas import UnComtradeTradeFlowResponse, UnComtradeTradeRecord
 from app.services.analysis_performance import is_timeout_error, record_provider_http_call
-from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE, DataProviderValidationError
+from app.services.providers import (
+    API_SOURCE,
+    CSV_FALLBACK_SOURCE,
+    DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECONDS,
+    DEFAULT_PROVIDER_TIMEOUT_SECONDS,
+    DataProviderValidationError,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -21,6 +28,7 @@ DEFAULT_SEED_DIR = PROJECT_ROOT / "data" / "seed"
 DEFAULT_NO_KEY_ENDPOINT = "https://comtradeapi.un.org/public/v1/preview/C/A/HS"
 DEFAULT_KEY_ENDPOINT = "https://comtradeapi.un.org/data/v1/get/C/A/HS"
 MAX_RECORDS = 500
+FallbackReason = Literal["provider_timeout", "provider_unavailable"]
 
 
 @dataclass(frozen=True)
@@ -74,8 +82,15 @@ _FLOW_ALIASES: dict[str, Literal["export", "import"]] = {
 
 
 class _UnComtradeApiError(Exception):
-    def __init__(self, message: str, *, retry_with_key: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_with_key: bool = False,
+        fallback_reason: FallbackReason = "provider_unavailable",
+    ) -> None:
         self.retry_with_key = retry_with_key
+        self.fallback_reason = fallback_reason
         super().__init__(message)
 
 
@@ -86,7 +101,7 @@ class UnComtradeProvider:
         settings: Settings | None = None,
         no_key_endpoint: str = DEFAULT_NO_KEY_ENDPOINT,
         key_endpoint: str = DEFAULT_KEY_ENDPOINT,
-        timeout_seconds: float = 20.0,
+        timeout_seconds: float = DEFAULT_PROVIDER_TIMEOUT_SECONDS,
         transport: httpx.AsyncBaseTransport | None = None,
         seed_dir: Path | None = None,
     ) -> None:
@@ -120,10 +135,12 @@ class UnComtradeProvider:
                 normalized_flow,
                 start_year,
                 end_year,
+                fallback_reason="provider_unavailable",
             )
 
+        fallback_reason: FallbackReason = "provider_unavailable"
         try:
-            records = await self._fetch_api_records(
+            records = await self._fetch_api_records_with_deadline(
                 self._no_key_endpoint,
                 normalized_reporter,
                 normalized_partner,
@@ -142,11 +159,13 @@ class UnComtradeProvider:
                 records,
                 fallback_used=False,
                 auth_mode="no_key",
+                fallback_reason=None,
             )
         except _UnComtradeApiError as exc:
+            fallback_reason = exc.fallback_reason
             if exc.retry_with_key and self._settings.un_comtrade_api_key:
                 try:
-                    records = await self._fetch_api_records(
+                    records = await self._fetch_api_records_with_deadline(
                         self._key_endpoint,
                         normalized_reporter,
                         normalized_partner,
@@ -165,9 +184,10 @@ class UnComtradeProvider:
                         records,
                         fallback_used=False,
                         auth_mode="key",
+                        fallback_reason=None,
                     )
-                except _UnComtradeApiError:
-                    pass
+                except _UnComtradeApiError as key_exc:
+                    fallback_reason = key_exc.fallback_reason
 
         return self._fallback_trade_flow(
             normalized_reporter,
@@ -176,7 +196,42 @@ class UnComtradeProvider:
             normalized_flow,
             start_year,
             end_year,
+            fallback_reason=fallback_reason,
         )
+
+    async def _fetch_api_records_with_deadline(
+        self,
+        endpoint: str,
+        reporter: _Country,
+        partner: _Country,
+        hs_code: str,
+        flow: Literal["export", "import"],
+        start_year: int,
+        end_year: int,
+        *,
+        auth_mode: Literal["no_key", "key"],
+        subscription_key: str | None,
+    ) -> list[UnComtradeTradeRecord]:
+        try:
+            return await asyncio.wait_for(
+                self._fetch_api_records(
+                    endpoint,
+                    reporter,
+                    partner,
+                    hs_code,
+                    flow,
+                    start_year,
+                    end_year,
+                    auth_mode=auth_mode,
+                    subscription_key=subscription_key,
+                ),
+                timeout=self._timeout_seconds,
+            )
+        except TimeoutError as exc:
+            raise _UnComtradeApiError(
+                "UN Comtrade request timed out",
+                fallback_reason="provider_timeout",
+            ) from exc
 
     async def _fetch_api_records(
         self,
@@ -192,7 +247,7 @@ class UnComtradeProvider:
         subscription_key: str | None,
     ) -> list[UnComtradeTradeRecord]:
         records: list[UnComtradeTradeRecord] = []
-        timeout = httpx.Timeout(self._timeout_seconds, connect=5.0)
+        timeout = httpx.Timeout(self._timeout_seconds, connect=DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECONDS)
         async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
             for year in range(start_year, end_year + 1):
                 params = _api_params(reporter, partner, hs_code, flow, year)
@@ -215,7 +270,10 @@ class UnComtradeProvider:
                         year=year,
                         auth_mode=auth_mode,
                     )
-                    raise _UnComtradeApiError("UN Comtrade request failed") from exc
+                    raise _UnComtradeApiError(
+                        "UN Comtrade request failed",
+                        fallback_reason="provider_timeout" if timeout_error else "provider_unavailable",
+                    ) from exc
 
                 record_provider_http_call(
                     provider="un_comtrade",
@@ -252,6 +310,8 @@ class UnComtradeProvider:
         flow: Literal["export", "import"],
         start_year: int,
         end_year: int,
+        *,
+        fallback_reason: FallbackReason,
     ) -> UnComtradeTradeFlowResponse:
         rows = _read_trade_rows(self._seed_dir)
         matched_rows = [
@@ -276,6 +336,7 @@ class UnComtradeProvider:
             records,
             fallback_used=True,
             auth_mode="fallback",
+            fallback_reason=fallback_reason,
         )
 
 
@@ -417,6 +478,7 @@ def _response(
     *,
     fallback_used: bool,
     auth_mode: Literal["no_key", "key", "fallback"],
+    fallback_reason: FallbackReason | None,
 ) -> UnComtradeTradeFlowResponse:
     return UnComtradeTradeFlowResponse(
         hs_code=hs_code,
@@ -426,6 +488,7 @@ def _response(
         records=records,
         fallback_used=fallback_used,
         auth_mode=auth_mode,
+        fallback_reason=fallback_reason,
     )
 
 

@@ -12,6 +12,7 @@ from app.schemas import MarketingGenerateRequest, MarketingGenerateResponse
 from app.services.ai import BailianClient
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_marketing_generation_messages
+from app.services.ai.qwen_timeout import wait_for_qwen
 
 
 class MarketingGenerationInputError(ValueError):
@@ -42,12 +43,20 @@ class MarketingGenerator:
         analysis_run = self._analysis_run(request.analysis_id)
         score = self._score_row(request)
         payload = self._prompt_payload(request, score)
-        result = await self._ai_client.chat(
-            build_marketing_generation_messages(payload),
-            temperature=0.5,
-            max_tokens=1400,
-            json_mode=True,
-        )
+        try:
+            result = await wait_for_qwen(
+                self._ai_client.chat(
+                    build_marketing_generation_messages(payload),
+                    temperature=0.5,
+                    max_tokens=1400,
+                    json_mode=True,
+                )
+            )
+        except TimeoutError as exc:
+            raise MarketingGenerationOutputError(
+                "AI_RESPONSE_TIMEOUT",
+                "Bailian marketing generation timed out.",
+            ) from exc
         response = self._response_from_content(result.content)
         if request.persist_to_analysis:
             if analysis_run is None:

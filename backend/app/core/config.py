@@ -106,6 +106,12 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("ENABLE_UN_COMTRADE", "SUPIN_ENABLE_UN_COMTRADE"),
     )
+    data_collection_concurrency: int = Field(
+        default=3,
+        ge=1,
+        le=8,
+        validation_alias=AliasChoices("DATA_COLLECTION_CONCURRENCY", "SUPIN_DATA_COLLECTION_CONCURRENCY"),
+    )
     ebay_client_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices("EBAY_CLIENT_ID", "SUPIN_EBAY_CLIENT_ID"),

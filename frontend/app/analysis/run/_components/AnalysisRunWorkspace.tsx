@@ -8,7 +8,9 @@ import { EmptyState } from "../../../_components/EmptyState";
 import { ErrorState } from "../../../_components/ErrorState";
 import { FallbackNotice } from "../../../_components/FallbackNotice";
 import { LoadingState } from "../../../_components/LoadingState";
+import { useI18n } from "../../../_components/LanguageProvider";
 import {
+  AnalysisPerformanceResponse,
   AnalysisStatusResponse,
   AnalysisStepLog,
   AnalysisWorkflowStatus,
@@ -16,6 +18,7 @@ import {
   Product,
   ProductDraft,
   generateReport,
+  getAnalysisPerformance,
   getAnalysisStatus,
   getFriendlyErrorMessage,
   listProductIntakeDrafts,
@@ -25,7 +28,6 @@ import {
 } from "../../../_lib/api-client";
 
 const POLL_INTERVAL_MS = 1500;
-const MAX_POLL_COUNT = 80;
 const DEMO_COUNTRY_INPUT = "US, JP, GB";
 const DEMO_PRODUCT_COUNT = 3;
 const DEFAULT_COMPETITOR_LIMIT = 20;
@@ -42,6 +44,7 @@ type EvidenceCard = {
 
 export function AnalysisRunWorkspace() {
   const router = useRouter();
+  const { text } = useI18n();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [recentIntakeDrafts, setRecentIntakeDrafts] = useState<ProductDraft[]>([]);
@@ -55,12 +58,14 @@ export function AnalysisRunWorkspace() {
   const [submitting, setSubmitting] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatusResponse | null>(null);
+  const [analysisPerformance, setAnalysisPerformance] = useState<AnalysisPerformanceResponse | null>(null);
   const [analysisId, setAnalysisId] = useState<number | null>(null);
+  const [lastStatusUpdatedAt, setLastStatusUpdatedAt] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const runTokenRef = useRef(0);
-  const pollCountRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -80,11 +85,13 @@ export function AnalysisRunWorkspace() {
   const resetRunState = useCallback(() => {
     clearPolling();
     runTokenRef.current += 1;
-    pollCountRef.current = 0;
     setSubmitting(false);
     setGeneratingReport(false);
     setAnalysisStatus(null);
+    setAnalysisPerformance(null);
     setAnalysisId(null);
+    setLastStatusUpdatedAt(null);
+    setNow(Date.now());
     setError(null);
     setNotice(null);
   }, [clearPolling]);
@@ -113,6 +120,11 @@ export function AnalysisRunWorkspace() {
   const terminal = analysisStatus ? isTerminalStatus(analysisStatus.status) : false;
   const fallbackUsed = analysisStatus?.status === "fallback_used" || Boolean(analysisStatus?.fallback_used_providers.length);
   const timelineSteps = analysisStatus?.step_logs.length ? analysisStatus.step_logs : buildInitialSteps();
+  const completedStepCount = countCompletedSteps(timelineSteps);
+  const currentStepLabel = currentStepDisplay(analysisStatus, timelineSteps);
+  const totalRunDurationMs = analysisPerformance?.duration_ms ?? runDurationMs(analysisStatus, now);
+  const dashboardReady = Boolean(analysisStatus && analysisStatus.scoring_summary.item_count > 0);
+  const reportPending = dashboardReady && !isStepComplete(timelineSteps, "09_report_prep");
 
   const loadProducts = useCallback(async (companyId: number, selectDemoDefaults = false): Promise<Product[]> => {
     setProductsLoading(true);
@@ -191,6 +203,18 @@ export function AnalysisRunWorkspace() {
       clearPolling();
     };
   }, [clearPolling, loadInitialData]);
+
+  useEffect(() => {
+    if (!submitting && (!analysisStatus || terminal)) {
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [analysisStatus, submitting, terminal]);
 
   function handleCompanyChange(value: string) {
     const companyId = value ? Number(value) : null;
@@ -276,10 +300,12 @@ export function AnalysisRunWorkspace() {
     clearPolling();
     const token = runTokenRef.current + 1;
     runTokenRef.current = token;
-    pollCountRef.current = 0;
     setSubmitting(true);
     setAnalysisStatus(null);
+    setAnalysisPerformance(null);
     setAnalysisId(null);
+    setLastStatusUpdatedAt(null);
+    setNow(Date.now());
     setNotice("分析任务已提交，正在等待智能体工作流接收。");
 
     const controller = new AbortController();
@@ -315,22 +341,21 @@ export function AnalysisRunWorkspace() {
     abortRef.current = controller;
 
     try {
-      const status = await getAnalysisStatus(runId, controller.signal);
+      const [status, performance] = await Promise.all([
+        getAnalysisStatus(runId, controller.signal),
+        getAnalysisPerformance(runId, controller.signal),
+      ]);
       if (token !== runTokenRef.current) {
         return;
       }
 
       setAnalysisStatus(status);
+      setAnalysisPerformance(performance);
+      setLastStatusUpdatedAt(new Date());
+      setNow(Date.now());
       if (isTerminalStatus(status.status) || status.finished_at) {
         setSubmitting(false);
         setNotice(buildTerminalNotice(status));
-        return;
-      }
-
-      pollCountRef.current += 1;
-      if (pollCountRef.current >= MAX_POLL_COUNT) {
-        setSubmitting(false);
-        setNotice("轮询已达到演示保护上限，后台任务可能仍在运行，可稍后刷新状态。");
         return;
       }
 
@@ -575,23 +600,30 @@ export function AnalysisRunWorkspace() {
               <DetailItem label="推荐国家" value={analysisStatus.scoring_summary.top_country ?? "-"} />
               <DetailItem label="数据源" value={analysisStatus.used_providers.join(", ") || "CSV 兜底"} />
             </div>
-            {terminal && analysisStatus.status !== "failed" ? (
-              <div className="mt-4 flex flex-wrap gap-2">
+            {dashboardReady ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <Link
                   className="rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white"
                   href={`/dashboard/${analysisStatus.analysis_id}`}
                 >
-                  查看看板
+                  {text("查看当前看板", "View current dashboard")}
                 </Link>
-                <button
-                  className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
-                  disabled={generatingReport}
-                  type="button"
-                  onClick={() => void handleGenerateReport()}
-                >
-                  {generatingReport ? "生成中" : "生成报告"}
-                </button>
+                {terminal && analysisStatus.status !== "failed" ? (
+                  <button
+                    className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
+                    disabled={generatingReport}
+                    type="button"
+                    onClick={() => void handleGenerateReport()}
+                  >
+                    {generatingReport ? "生成中" : "生成报告"}
+                  </button>
+                ) : null}
               </div>
+            ) : null}
+            {reportPending ? (
+              <p className="mt-3 rounded-lg border border-river/20 bg-river/5 p-3 text-sm font-medium leading-6 text-river">
+                {text("报告可稍后生成，不影响看板查看", "The report can be generated later and does not block dashboard viewing.")}
+              </p>
             ) : null}
           </Panel>
         ) : null}
@@ -599,6 +631,15 @@ export function AnalysisRunWorkspace() {
 
       <section className="grid gap-5">
         <Panel title="智能体协作分析">
+          <ProgressOverview
+            completedStepCount={completedStepCount}
+            currentStepLabel={currentStepLabel}
+            lastStatusUpdatedAt={lastStatusUpdatedAt}
+            status={analysisStatus?.status ?? "waiting"}
+            text={text}
+            totalRunDurationMs={totalRunDurationMs}
+            totalStepCount={STEP_IDS.length}
+          />
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-ink">9 个后端智能体按顺序执行</p>
@@ -608,7 +649,13 @@ export function AnalysisRunWorkspace() {
               {workflowStatusLabel(analysisStatus?.status ?? "waiting")}
             </span>
           </div>
-          <AgentFlowTimeline currentStepId={analysisStatus?.current_step} steps={timelineSteps} />
+          <AgentFlowTimeline
+            currentStepId={analysisStatus?.current_step}
+            now={now}
+            performanceSteps={analysisPerformance?.steps}
+            steps={timelineSteps}
+          />
+          <PerformanceSlowPoints performance={analysisPerformance} steps={timelineSteps} text={text} now={now} />
         </Panel>
 
         <FallbackSummary status={analysisStatus} />
@@ -644,6 +691,105 @@ function DetailItem({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-semibold text-slate-500">{label}</p>
       <p className="mt-1 truncate font-medium text-ink">{value}</p>
     </div>
+  );
+}
+
+function ProgressOverview({
+  completedStepCount,
+  currentStepLabel,
+  lastStatusUpdatedAt,
+  status,
+  text,
+  totalRunDurationMs,
+  totalStepCount,
+}: {
+  completedStepCount: number;
+  currentStepLabel: string;
+  lastStatusUpdatedAt: Date | null;
+  status: AnalysisWorkflowStatus;
+  text: (zh: string, en?: string) => string;
+  totalRunDurationMs: number | null;
+  totalStepCount: number;
+}) {
+  return (
+    <div className="mb-4 grid gap-3 rounded-lg border border-river/20 bg-river/5 p-4 sm:grid-cols-2 xl:grid-cols-4">
+      <ProgressMetric
+        label={text("已完成", "Completed")}
+        value={text(`${completedStepCount}/${totalStepCount}`, `${completedStepCount}/${totalStepCount}`)}
+      />
+      <ProgressMetric label={text("当前步骤", "Current step")} value={currentStepLabel} />
+      <ProgressMetric label={text("总运行时间", "Total runtime")} value={formatDuration(totalRunDurationMs)} />
+      <ProgressMetric
+        label={text("最近一次状态更新时间", "Last status update")}
+        value={formatDateTimeFromDate(lastStatusUpdatedAt)}
+      />
+      <div className="sm:col-span-2 xl:col-span-4">
+        <span className={`inline-flex rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ${overallStatusClassName(status)}`}>
+          {workflowStatusLabel(status, text)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ProgressMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold text-river/80">{label}</p>
+      <p className="mt-1 truncate text-sm font-semibold text-ink">{value}</p>
+    </div>
+  );
+}
+
+function PerformanceSlowPoints({
+  performance,
+  steps,
+  text,
+  now,
+}: {
+  performance: AnalysisPerformanceResponse | null;
+  steps: AnalysisStepLog[];
+  text: (zh: string, en?: string) => string;
+  now: number;
+}) {
+  const rows = buildSlowPointRows(performance, steps, now);
+  return (
+    <section className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">{text("性能慢点", "Performance slow spots")}</h3>
+        <span className="text-xs text-slate-500">
+          {text("来自 /api/analysis/{id}/performance 的安全聚合字段", "Safe aggregate fields from /api/analysis/{id}/performance")}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="mt-3 text-sm text-slate-500">{text("等待性能数据。", "Waiting for performance data.")}</p>
+      ) : (
+        <div className="mt-3 grid gap-2">
+          {rows.map((row) => (
+            <article key={row.stepId} className="rounded-md border border-slate-200 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-ink">{row.title}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {text("状态", "Status")}：{workflowStatusLabel(row.status, text)} · duration_ms：{formatMilliseconds(row.durationMs)}
+                  </p>
+                </div>
+                <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ${overallStatusClassName(row.status)}`}>
+                  {workflowStatusLabel(row.status, text)}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-5">
+                <ProgressMetric label="provider" value={String(row.providerCallCount)} />
+                <ProgressMetric label="qwen" value={String(row.qwenCallCount)} />
+                <ProgressMetric label="cache" value={String(row.cacheHitCount)} />
+                <ProgressMetric label="fallback" value={String(row.fallbackCount)} />
+                <ProgressMetric label="timeout" value={String(row.timeoutCount)} />
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -687,6 +833,59 @@ function buildInitialSteps(): AnalysisStepLog[] {
     error_code: null,
     error_message: null,
   }));
+}
+
+type SlowPointRow = {
+  stepId: string;
+  title: string;
+  status: AnalysisWorkflowStatus;
+  durationMs: number | null;
+  providerCallCount: number;
+  qwenCallCount: number;
+  cacheHitCount: number;
+  fallbackCount: number;
+  timeoutCount: number;
+};
+
+function buildSlowPointRows(
+  performance: AnalysisPerformanceResponse | null,
+  steps: AnalysisStepLog[],
+  now: number,
+): SlowPointRow[] {
+  const performanceByStepId = new Map((performance?.steps ?? []).map((step) => [step.step_id, step]));
+  return steps
+    .map((step) => {
+      const performanceStep = performanceByStepId.get(step.step_id);
+      const durationMs =
+        performanceStep?.duration_ms ??
+        step.duration_ms ??
+        (step.status === "running" ? elapsedSince(step.started_at, now) : null);
+      const row: SlowPointRow = {
+        stepId: step.step_id,
+        title: AGENT_STEP_LABELS[step.step_id] ?? step.title,
+        status: step.status,
+        durationMs,
+        providerCallCount: performanceStep?.provider_call_count ?? step.provider_call_count,
+        qwenCallCount: performanceStep?.qwen_call_count ?? step.qwen_call_count,
+        cacheHitCount: performanceStep?.cache_hit_count ?? step.cache_hit_count,
+        fallbackCount: performanceStep?.fallback_count ?? step.fallback_count,
+        timeoutCount: performanceStep?.timeout_count ?? step.timeout_count,
+      };
+      return row;
+    })
+    .filter((row) => row.durationMs !== null || slowPointCountTotal(row) > 0)
+    .sort((left, right) => {
+      const durationDelta = (right.durationMs ?? 0) - (left.durationMs ?? 0);
+      if (durationDelta !== 0) {
+        return durationDelta;
+      }
+      return slowPointCountTotal(right) - slowPointCountTotal(left);
+    })
+    .slice(0, 4);
+}
+
+function slowPointCountTotal(row: SlowPointRow): number {
+  return row.providerCallCount + row.qwenCallCount + row.cacheHitCount + row.fallbackCount + row.timeoutCount;
 }
 
 function stepIdToNode(stepId: string): string {
@@ -805,6 +1004,33 @@ function isTerminalStatus(status: AnalysisWorkflowStatus): boolean {
   return status === "success" || status === "failed" || status === "fallback_used";
 }
 
+function countCompletedSteps(steps: AnalysisStepLog[]): number {
+  return steps.filter((step) => isStepCompleteStatus(step.status)).length;
+}
+
+function isStepComplete(steps: AnalysisStepLog[], stepId: string): boolean {
+  return steps.some((step) => step.step_id === stepId && isStepCompleteStatus(step.status));
+}
+
+function isStepCompleteStatus(status: AnalysisWorkflowStatus): boolean {
+  return status === "success" || status === "fallback_used";
+}
+
+function currentStepDisplay(status: AnalysisStatusResponse | null, steps: AnalysisStepLog[]): string {
+  if (!status) {
+    return "等待开始";
+  }
+  if (status.status === "failed") {
+    const failedStep = steps.find((step) => step.status === "failed");
+    return failedStep ? AGENT_STEP_LABELS[failedStep.step_id] ?? failedStep.title : "失败步骤";
+  }
+  if (isTerminalStatus(status.status)) {
+    return "全部步骤已结束";
+  }
+  const currentStep = steps.find((step) => step.step_id === status.current_step);
+  return currentStep ? AGENT_STEP_LABELS[currentStep.step_id] ?? currentStep.title : "等待后端更新";
+}
+
 function buildTerminalNotice(status: AnalysisStatusResponse): string {
   if (status.status === "failed") {
     return "分析已停止，失败步骤已在右侧标出。";
@@ -819,6 +1045,57 @@ function formatScore(value: string | number | null): string {
   return String(value);
 }
 
+function runDurationMs(status: AnalysisStatusResponse | null, now: number): number | null {
+  if (!status?.started_at) {
+    return null;
+  }
+  const startedAt = new Date(status.started_at).getTime();
+  const finishedAt = status.finished_at ? new Date(status.finished_at).getTime() : now;
+  if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt)) {
+    return null;
+  }
+  return Math.max(0, finishedAt - startedAt);
+}
+
+function elapsedSince(value: string | null | undefined, now: number): number | null {
+  if (!value) {
+    return null;
+  }
+  const startedAt = new Date(value).getTime();
+  if (!Number.isFinite(startedAt)) {
+    return null;
+  }
+  return Math.max(0, now - startedAt);
+}
+
+function formatDuration(value: number | null): string {
+  if (value === null) {
+    return "-";
+  }
+  if (value < 1000) {
+    return `${value} ms`;
+  }
+  return `${(value / 1000).toFixed(1)} s`;
+}
+
+function formatMilliseconds(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  return `${value} ms`;
+}
+
+function formatDateTimeFromDate(value: Date | null): string {
+  if (!value) {
+    return "-";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(value);
+}
+
 function overallStatusClassName(status: AnalysisWorkflowStatus): string {
   const classNames: Record<AnalysisWorkflowStatus, string> = {
     waiting: "bg-slate-100 text-slate-600 ring-slate-200",
@@ -830,15 +1107,16 @@ function overallStatusClassName(status: AnalysisWorkflowStatus): string {
   return classNames[status];
 }
 
-function workflowStatusLabel(status: AnalysisWorkflowStatus): string {
-  const labels: Record<AnalysisWorkflowStatus, string> = {
-    waiting: "等待中",
-    running: "运行中",
-    success: "已完成",
-    failed: "失败",
-    fallback_used: "使用兜底",
+function workflowStatusLabel(status: AnalysisWorkflowStatus, localize?: (zh: string, en?: string) => string): string {
+  const labels: Record<AnalysisWorkflowStatus, [string, string]> = {
+    waiting: ["等待中", "Waiting"],
+    running: ["运行中", "Running"],
+    success: ["已完成", "Completed"],
+    failed: ["失败", "Failed"],
+    fallback_used: ["使用兜底", "Fallback used"],
   };
-  return labels[status];
+  const [zh, en] = labels[status];
+  return localize ? localize(zh, en) : zh;
 }
 
 function evidenceCardClassName(tone: EvidenceCard["tone"]): string {

@@ -394,6 +394,27 @@ export type ProviderTestResponse = {
   auth_mode: "no_key" | "key" | "fallback" | null;
 };
 
+export type UnComtradeFallbackReason = "provider_timeout" | "provider_unavailable";
+
+export type UnComtradeTradeRecord = {
+  year: number;
+  trade_value_usd: string | number | null;
+  quantity: string | number | null;
+  source: "api" | "csv_fallback";
+};
+
+export type UnComtradeTradeFlowResponse = {
+  provider: "un_comtrade";
+  hs_code: string;
+  reporter: string;
+  partner: string;
+  flow: "export" | "import";
+  records: UnComtradeTradeRecord[];
+  fallback_used: boolean;
+  auth_mode: "no_key" | "key" | "fallback";
+  fallback_reason: UnComtradeFallbackReason | null;
+};
+
 export type AdminRequestOptions = {
   adminPassword?: string;
 };
@@ -491,6 +512,7 @@ export type AnalysisPerformanceEvent = {
   cache_hit: boolean;
   fallback_used: boolean;
   timeout: boolean;
+  timeout_count: number;
   country?: string | null;
   year?: number | null;
   auth_mode?: string | null;

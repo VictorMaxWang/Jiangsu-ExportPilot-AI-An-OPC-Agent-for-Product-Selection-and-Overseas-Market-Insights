@@ -13,7 +13,13 @@ import httpx
 from app.core.config import Settings, get_settings
 from app.schemas import EtsyListingItem, EtsySearchResponse
 from app.services.analysis_performance import is_timeout_error, record_provider_http_call
-from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE, DataProviderValidationError
+from app.services.providers import (
+    API_SOURCE,
+    CSV_FALLBACK_SOURCE,
+    DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECONDS,
+    DEFAULT_PROVIDER_TIMEOUT_SECONDS,
+    DataProviderValidationError,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -88,7 +94,7 @@ class EtsyProvider:
         settings: Settings | None = None,
         endpoint: str = DEFAULT_ENDPOINT,
         ping_endpoint: str = DEFAULT_PING_ENDPOINT,
-        timeout_seconds: float = 15.0,
+        timeout_seconds: float = DEFAULT_PROVIDER_TIMEOUT_SECONDS,
         transport: httpx.AsyncBaseTransport | None = None,
         seed_dir: Path | None = None,
         clock: Callable[[], datetime] | None = None,
@@ -143,7 +149,7 @@ class EtsyProvider:
         if not self._settings.etsy_keystring or not self._settings.etsy_shared_secret:
             raise _EtsyApiError("Etsy credentials are not configured", code=ETSY_NOT_CONFIGURED)
 
-        timeout = httpx.Timeout(self._timeout_seconds, connect=5.0)
+        timeout = httpx.Timeout(self._timeout_seconds, connect=DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECONDS)
         try:
             async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
                 response = await client.get(self._ping_endpoint, headers=self._auth_headers())
@@ -177,7 +183,7 @@ class EtsyProvider:
             params["currency"] = currency
 
         headers = self._auth_headers()
-        timeout = httpx.Timeout(self._timeout_seconds, connect=5.0)
+        timeout = httpx.Timeout(self._timeout_seconds, connect=DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECONDS)
         started_at = datetime.now(timezone.utc)
         start = perf_counter()
         try:

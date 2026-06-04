@@ -18,7 +18,8 @@ from app.services import report_service
 from app.services.ai import BailianClient, BailianError
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_report_generation_messages
-from app.services.analysis_performance import mark_latest_qwen_fallback
+from app.services.ai.qwen_timeout import wait_for_qwen
+from app.services.analysis_performance import is_timeout_error, mark_latest_qwen_fallback
 from app.services.dashboard_service import DashboardService
 
 
@@ -210,18 +211,19 @@ class ReportGenerator:
         deterministic_markdown: str,
     ) -> tuple[str, bool]:
         payload = {
-            "report_input": report_input,
-            "deterministic_markdown": deterministic_markdown,
+            "report_input": _compact_report_input(report_input),
             "required_title": REPORT_TITLE,
             "required_sections": list(REPORT_SECTION_TITLES),
             "output_contract": {"content_markdown": "string"},
         }
         try:
-            result = await self._ai_client.chat(
-                build_report_generation_messages(payload),
-                temperature=0.25,
-                max_tokens=5200,
-                json_mode=True,
+            result = await wait_for_qwen(
+                self._ai_client.chat(
+                    build_report_generation_messages(payload),
+                    temperature=0.25,
+                    max_tokens=3600,
+                    json_mode=True,
+                )
             )
             parsed = parse_json_object(result.content)
             content_markdown = parsed.get("content_markdown")
@@ -231,8 +233,8 @@ class ReportGenerator:
             content_markdown = _ensure_intake_source_markdown(content_markdown, report_input)
             _validate_report_markdown(content_markdown)
             return content_markdown, False
-        except (BailianError, AiJsonParseError, ValueError, TypeError):
-            mark_latest_qwen_fallback("report_generation")
+        except (BailianError, AiJsonParseError, ValueError, TypeError, TimeoutError) as exc:
+            mark_latest_qwen_fallback("report_generation_timeout" if is_timeout_error(exc) else "report_generation")
             fallback = _ensure_intake_source_markdown(_fallback_notice(deterministic_markdown), report_input)
             _validate_report_markdown(fallback)
             return fallback, True
@@ -772,6 +774,118 @@ def _fallback_notice(markdown: str) -> str:
         + "\n\n---\n"
         + "生成说明：qwen3.6-plus 未返回可用的合规结构化报告，本版本使用后端确定性模板基于结构化数据生成。"
     )
+
+
+def _compact_report_input(report_input: dict[str, Any]) -> dict[str, Any]:
+    dashboard = report_input.get("dashboard") if isinstance(report_input.get("dashboard"), dict) else {}
+    scores = _record_list(report_input.get("scores"))
+    top_scores = [_compact_score(score) for score in scores[:8]]
+    risk_cards = _record_list(dashboard.get("risk_cards"))
+    score_risks = [
+        {
+            "product": _safe_text(score.get("product_name")),
+            "country": _safe_text(score.get("country")),
+            "risk": _safe_text(score.get("risk")),
+            "next_action": _safe_text(score.get("next_action")),
+            "fallback_used": bool(score.get("fallback_used") or score.get("ai_fallback_used")),
+        }
+        for score in scores[:8]
+        if _safe_text(score.get("risk")) or _safe_text(score.get("next_action"))
+    ]
+    return _jsonable(
+        {
+            "report_title": report_input.get("report_title"),
+            "analysis": report_input.get("analysis"),
+            "company": report_input.get("company"),
+            "products": [_compact_product(product) for product in _record_list(report_input.get("products"))[:8]],
+            "top_scores": top_scores,
+            "core_data_sources": _record_list(report_input.get("data_sources"))[:16],
+            "market_profiles": [
+                {
+                    "product_id": item.get("product_id"),
+                    "country": item.get("country"),
+                    "summary": _safe_text(item.get("summary")),
+                    "competition_level": _safe_text(item.get("competition_level")),
+                }
+                for item in _record_list(report_input.get("market_profiles"))[:8]
+            ],
+            "marketing_assets": [
+                _compact_marketing_asset(asset)
+                for asset in _record_list(report_input.get("marketing_assets"))[:8]
+            ],
+            "price_ranges": _record_list(dashboard.get("price_ranges"))[:8],
+            "content_themes": _record_list(dashboard.get("content_themes"))[:12],
+            "risks": {
+                "cards": risk_cards[:8],
+                "score_risks": score_risks,
+            },
+            "policy": report_input.get("policy"),
+        }
+    )
+
+
+def _compact_product(product: dict[str, Any]) -> dict[str, Any]:
+    intake_source = product.get("intake_source") if isinstance(product.get("intake_source"), dict) else None
+    compact: dict[str, Any] = {
+        "id": product.get("id"),
+        "product_name_cn": product.get("product_name_cn"),
+        "product_name_en": product.get("product_name_en"),
+        "category": product.get("category"),
+        "material": product.get("material"),
+        "certification": product.get("certification"),
+        "product_keywords": product.get("product_keywords"),
+    }
+    if intake_source is not None:
+        compact["intake_source"] = {
+            "source_type": intake_source.get("source_type"),
+            "source_platform": intake_source.get("source_platform"),
+            "confidence_score": intake_source.get("confidence_score"),
+            "low_confidence": intake_source.get("low_confidence"),
+            "confirmation_note": intake_source.get("confirmation_note"),
+            "domestic_price_role": intake_source.get("domestic_price_role"),
+        }
+    return compact
+
+
+def _compact_score(score: dict[str, Any]) -> dict[str, Any]:
+    competitor = score.get("competitor_analysis") if isinstance(score.get("competitor_analysis"), dict) else {}
+    evidence = score.get("evidence") if isinstance(score.get("evidence"), dict) else {}
+    return {
+        "rank": score.get("rank"),
+        "product_id": score.get("product_id"),
+        "product_name": score.get("product_name"),
+        "country": score.get("country"),
+        "total_score": score.get("total_score"),
+        "dimensions": {
+            "trend": score.get("trend_score"),
+            "price": score.get("price_score"),
+            "market": score.get("market_score"),
+            "supply": score.get("supply_score"),
+            "logistics": score.get("logistics_score"),
+            "content": score.get("content_score"),
+        },
+        "reason": score.get("reason"),
+        "risk": score.get("risk"),
+        "next_action": score.get("next_action"),
+        "fallback_used": bool(score.get("fallback_used") or score.get("ai_fallback_used")),
+        "keyword": evidence.get("keyword"),
+        "price_suggestion": competitor.get("price_suggestion"),
+        "competition_level": competitor.get("competition_level"),
+    }
+
+
+def _compact_marketing_asset(asset: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalized_marketing_asset(asset)
+    return {
+        "product": normalized.get("product"),
+        "country": normalized.get("country"),
+        "title": normalized.get("title"),
+        "bullet_points": normalized.get("bullet_points", [])[:5],
+        "short_video_script": normalized.get("short_video_script"),
+        "pinterest_keywords": normalized.get("pinterest_keywords", [])[:8],
+        "risk_notes": asset.get("risk_notes", [])[:5] if isinstance(asset.get("risk_notes"), list) else [],
+        "platform_listing_advice": asset.get("platform_listing_advice"),
+    }
 
 
 def _normalize_ai_markdown(content: str) -> str:

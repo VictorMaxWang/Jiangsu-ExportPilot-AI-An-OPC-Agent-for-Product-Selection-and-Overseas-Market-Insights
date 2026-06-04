@@ -38,6 +38,11 @@ async def generate_report(
         )
     except ReportGenerationInputError as exc:
         raise _input_exception(exc) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "REPORT_GENERATION_FAILED", "message": "报告生成失败，可重新生成报告。"},
+        ) from exc
     return outcome.report
 
 

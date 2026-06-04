@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Generator
 from decimal import Decimal
@@ -103,6 +104,27 @@ def test_marketing_generate_rejects_policy_violating_output(
     assert response.json()["detail"]["code"] == "AI_RESPONSE_SCHEMA_ERROR"
 
 
+def test_marketing_generate_qwen_timeout_returns_504(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    monkeypatch.setenv("BAILIAN_TIMEOUT_SECONDS", "0.01")
+    get_settings.cache_clear()
+    client, _session_factory = client_with_session
+    app.dependency_overrides[get_bailian_client] = lambda: SlowBailianClient()
+    try:
+        response = client.post(
+            "/api/marketing/generate",
+            json={"product": "Boho Throw Blanket", "country": "US"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_bailian_client, None)
+        get_settings.cache_clear()
+
+    assert response.status_code == 504
+    assert response.json()["detail"]["code"] == "AI_RESPONSE_TIMEOUT"
+
+
 def test_marketing_generate_persists_to_analysis_workflow_state(
     client_with_session: tuple[TestClient, sessionmaker[Session]],
 ) -> None:
@@ -201,6 +223,12 @@ class StubBailianClient:
         self.messages = messages
         self.json_mode = json_mode
         return BailianChatCompletion(content=self.content, model="qwen3.6-plus")
+
+
+class SlowBailianClient:
+    async def chat(self, *args: object, **kwargs: object) -> BailianChatCompletion:
+        await asyncio.sleep(0.05)
+        return BailianChatCompletion(content=_valid_marketing_json(), model="qwen3.6-plus")
 
 
 def _seed_analysis(session_factory: sessionmaker[Session]) -> tuple[int, int]:

@@ -302,6 +302,7 @@ class UnComtradeTradeFlowResponse(BaseModel):
     records: list[UnComtradeTradeRecord]
     fallback_used: bool = False
     auth_mode: Literal["no_key", "key", "fallback"]
+    fallback_reason: Literal["provider_timeout", "provider_unavailable"] | None = None
 
 
 class DataProviderSyncResponse(BaseModel):

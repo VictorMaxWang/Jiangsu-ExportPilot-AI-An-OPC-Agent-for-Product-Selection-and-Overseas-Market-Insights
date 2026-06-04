@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Generator
 from decimal import Decimal
@@ -11,12 +12,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.ai import get_bailian_client
+from app.core.config import get_settings
 from app.db import get_db
 from app.db.base import Base
 from app.main import app
 from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductDraft, ProductImportJob, Report
 from app.services.ai import BailianChatCompletion, BailianConfigurationError
-from app.services.reports import REPORT_SECTION_TITLES, REPORT_TITLE
+from app.services.reports import REPORT_SECTION_TITLES, REPORT_TITLE, ReportGenerator
 
 
 def test_report_generate_saves_markdown_html_and_routes(
@@ -100,6 +102,60 @@ def test_report_generate_bad_json_uses_deterministic_fallback(
     assert "国内商品截图/链接用于识别企业可供产品信息。" in markdown
     assert "国内链接价格不代表海外销售价格" in markdown
     assert "secret-token" not in markdown
+
+
+def test_report_generate_qwen_timeout_returns_persisted_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    monkeypatch.setenv("BAILIAN_TIMEOUT_SECONDS", "0.01")
+    get_settings.cache_clear()
+    client, session_factory = client_with_session
+    analysis_id = _seed_report_analysis(session_factory)
+    stub = SlowReportClient()
+    app.dependency_overrides[get_bailian_client] = lambda: stub
+    try:
+        response = client.post("/api/reports/generate", json={"analysis_id": analysis_id})
+    finally:
+        app.dependency_overrides.pop(get_bailian_client, None)
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["title"] == REPORT_TITLE
+    assert "qwen3.6-plus" in payload["content_markdown"]
+    assert "## 13." in payload["content_markdown"]
+    assert "<article" in payload["content_html"]
+    with session_factory() as db:
+        report = db.scalar(select(Report).where(Report.analysis_id == analysis_id))
+        assert report is not None
+        assert report.content_markdown == payload["content_markdown"]
+        assert report.content_html == payload["content_html"]
+
+
+def test_report_generate_unrecoverable_error_returns_retryable_copy(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_with_session
+    analysis_id = _seed_report_analysis(session_factory)
+
+    async def fail_generate(
+        self: ReportGenerator,
+        analysis_id: int,
+        *,
+        force_regenerate: bool = False,
+    ) -> object:
+        raise RuntimeError("renderer unavailable")
+
+    monkeypatch.setattr(ReportGenerator, "generate_from_analysis", fail_generate)
+
+    response = client.post("/api/reports/generate", json={"analysis_id": analysis_id})
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["code"] == "REPORT_GENERATION_FAILED"
+    assert detail["message"] == "报告生成失败，可重新生成报告。"
 
 
 def test_report_generate_missing_key_uses_deterministic_fallback(
@@ -214,6 +270,15 @@ class StubBailianClient:
         self.messages = messages
         self.json_mode = json_mode
         return BailianChatCompletion(content=self.content, model="qwen3.6-plus")
+
+
+class SlowReportClient:
+    async def chat(self, *args: object, **kwargs: object) -> BailianChatCompletion:
+        await asyncio.sleep(0.05)
+        return BailianChatCompletion(
+            content=json.dumps({"content_markdown": _valid_report_markdown()}),
+            model="qwen3.6-plus",
+        )
 
 
 class MissingKeyClient:

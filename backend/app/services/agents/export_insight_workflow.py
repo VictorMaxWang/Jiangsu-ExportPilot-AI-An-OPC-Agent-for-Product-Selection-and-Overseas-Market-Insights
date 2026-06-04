@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -12,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductDraft, ProductKeyword, Report
 from app.schemas import (
@@ -25,6 +27,8 @@ from app.schemas import (
     AnalysisRunStartResponse,
     AnalysisStatusResponse,
     AnalysisStepLog,
+    DataSourceCompetitorSearchResponse,
+    DataSourceContentTrendResponse,
     MarketingCopyResponse,
     ProductKeywordsRequest,
     ProviderBreakdownItem,
@@ -32,6 +36,8 @@ from app.schemas import (
     ReportSectionResponse,
     ScoringRunRequest,
     ScoringSummary,
+    UnComtradeTradeFlowResponse,
+    WorldBankCountryResponse,
 )
 from app.services import report_service
 from app.services.ai import (
@@ -42,6 +48,7 @@ from app.services.ai import (
 )
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_marketing_copy_messages, build_report_section_messages
+from app.services.ai.qwen_timeout import wait_for_qwen
 from app.services.analysis import ContentTrendAnalysisService, MarketProfileAnalysisService, analyze_competitors
 from app.services.analysis_performance import (
     PROVIDER_EVENT_TYPES,
@@ -51,7 +58,10 @@ from app.services.analysis_performance import (
     analysis_performance_scope,
     get_performance_events,
     get_truncated_event_count,
+    is_timeout_error,
     mark_latest_qwen_fallback,
+    record_provider_cache_hit,
+    record_provider_call,
     step_performance_counts,
 )
 from app.services.data_sources import DataSourceService
@@ -626,62 +636,230 @@ class DataCollectionAgent(BaseWorkflowAgent):
         summaries: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         fallback_providers: set[str] = set()
-        provider_call_count = 0
+        fallback_reasons: set[str] = set()
+        local_cache_hit_count = 0
+        local_fallback_hit_count = 0
 
-        market_profiles: dict[str, Any] = {}
-        for country in context.request.target_countries:
-            provider_call_count += 1
-            market_profiles[country] = await context.data_sources.get_market_profile(country)
-            sources.append(_source_from_response("worldbank", market_profiles[country], "World Bank market profile"))
-            if market_profiles[country].fallback_used:
-                fallback_providers.add("worldbank")
+        countries = [str(country).strip().upper() for country in context.request.target_countries]
+        products = [item for item in (context.state.get("product_profiles") or []) if isinstance(item, dict)]
+        concurrency = get_settings().data_collection_concurrency
+        semaphore = asyncio.Semaphore(concurrency)
 
-        for product in context.state.get("product_profiles", []):
+        market_jobs: dict[str, dict[str, Any]] = {}
+        competitor_jobs: dict[tuple[str, str], dict[str, Any]] = {}
+        content_jobs: dict[tuple[str, str], dict[str, Any]] = {}
+        trade_jobs: dict[tuple[str, str], dict[str, Any]] = {}
+        competitor_first_signal: dict[tuple[str, str], str] = {}
+        content_first_signal: dict[tuple[str, str], str] = {}
+        trade_first_signal: dict[tuple[str, str], str] = {}
+        signal_specs: list[dict[str, Any]] = []
+
+        for country in countries:
+            market_jobs.setdefault(country, {"country": country})
+
+        for product in products:
             keyword = str(product.get("keyword") or product.get("product_name_en") or product.get("product_name_cn"))
             category = str(product.get("category") or keyword)
             hs_code = str(product.get("hs_code") or _infer_hs_code(category))
-            for country in context.request.target_countries:
-                provider_call_count += 3
-                competitors = await context.data_sources.search_competitors(
-                    keyword,
-                    country=country,
-                    limit=context.request.competitor_limit,
-                )
-                content = await context.data_sources.get_content_trends(keyword, country=country, limit=20)
-                trade = await context.data_sources.get_trade_data(category, hs_code=hs_code, country=country)
+            for country in countries:
+                signal_key = _product_country_key(int(product["id"]), country)
+                competitor_key = (_data_collection_text_key(keyword), country)
+                content_key = (_data_collection_text_key(keyword), country)
+                trade_key = (_data_collection_hs_key(hs_code), country)
 
-                key = _product_country_key(int(product["id"]), country)
-                raw_signals[key] = {
-                    "product": product,
-                    "country": country,
-                    "competitors": competitors,
-                    "content": content,
-                    "market": market_profiles[country],
-                    "trade": trade,
-                }
-                summaries.append(
+                competitor_jobs.setdefault(competitor_key, {"keyword": keyword, "country": country})
+                content_jobs.setdefault(content_key, {"keyword": keyword, "country": country})
+                trade_jobs.setdefault(trade_key, {"category": category, "hs_code": hs_code, "country": country})
+                competitor_first_signal.setdefault(competitor_key, signal_key)
+                content_first_signal.setdefault(content_key, signal_key)
+                trade_first_signal.setdefault(trade_key, signal_key)
+                signal_specs.append(
                     {
-                        "product_id": product["id"],
+                        "signal_key": signal_key,
+                        "product": product,
                         "country": country,
-                        "competitor_items": len(competitors.items),
-                        "content_items": len(content.items),
-                        "market_indicators": len(market_profiles[country].indicators),
-                        "trade_records": len(trade.records),
+                        "competitor_key": competitor_key,
+                        "content_key": content_key,
+                        "trade_key": trade_key,
                     }
                 )
-                for provider, response, label in (
-                    ("etsy", competitors, "Etsy competitor search"),
-                    ("data_source_service", content, "Unified content trends"),
-                    ("un_comtrade", trade, "UN Comtrade trade data"),
-                ):
-                    sources.append(_source_from_response(provider, response, label))
-                    if bool(getattr(response, "fallback_used", False)):
-                        fallback_providers.add(provider)
+
+        job_entries: list[tuple[str, Any, Any]] = []
+        for country, job in market_jobs.items():
+            job_entries.append(
+                (
+                    "market",
+                    country,
+                    self._provider_job(
+                        semaphore,
+                        provider="worldbank",
+                        endpoint="market_profile",
+                        country=country,
+                        fallback_reasons=fallback_reasons,
+                        call=lambda country=job["country"]: context.data_sources.get_market_profile(country),
+                        fallback=lambda reason, country=job["country"]: _empty_market_profile_response(country),
+                    ),
+                )
+            )
+        for key, job in competitor_jobs.items():
+            job_entries.append(
+                (
+                    "competitors",
+                    key,
+                    self._provider_job(
+                        semaphore,
+                        provider="etsy",
+                        endpoint="search_competitors",
+                        country=job["country"],
+                        fallback_reasons=fallback_reasons,
+                        call=lambda job=job: context.data_sources.search_competitors(
+                            job["keyword"],
+                            country=job["country"],
+                            limit=context.request.competitor_limit,
+                        ),
+                        fallback=lambda reason, job=job: _empty_competitor_response(job["keyword"], job["country"]),
+                    ),
+                )
+            )
+        for key, job in content_jobs.items():
+            job_entries.append(
+                (
+                    "content",
+                    key,
+                    self._provider_job(
+                        semaphore,
+                        provider="data_source_service",
+                        endpoint="content_trends",
+                        country=job["country"],
+                        fallback_reasons=fallback_reasons,
+                        call=lambda job=job: context.data_sources.get_content_trends(
+                            job["keyword"],
+                            country=job["country"],
+                            limit=20,
+                        ),
+                        fallback=lambda reason, job=job: _empty_content_response(job["keyword"], job["country"]),
+                    ),
+                )
+            )
+        for key, job in trade_jobs.items():
+            job_entries.append(
+                (
+                    "trade",
+                    key,
+                    self._provider_job(
+                        semaphore,
+                        provider="un_comtrade",
+                        endpoint="trade_data",
+                        country=job["country"],
+                        fallback_reasons=fallback_reasons,
+                        call=lambda job=job: context.data_sources.get_trade_data(
+                            job["category"],
+                            hs_code=job["hs_code"],
+                            country=job["country"],
+                        ),
+                        fallback=lambda reason, job=job: _empty_trade_response(
+                            job["hs_code"],
+                            job["country"],
+                            fallback_reason=reason,
+                        ),
+                    ),
+                )
+            )
+
+        market_profiles: dict[str, Any] = {}
+        competitor_results: dict[tuple[str, str], Any] = {}
+        content_results: dict[tuple[str, str], Any] = {}
+        trade_results: dict[tuple[str, str], Any] = {}
+        if job_entries:
+            results = await asyncio.gather(*(entry[2] for entry in job_entries))
+            for (kind, key, _job), response in zip(job_entries, results):
+                if kind == "market":
+                    market_profiles[str(key)] = response
+                elif kind == "competitors":
+                    competitor_results[key] = response
+                elif kind == "content":
+                    content_results[key] = response
+                elif kind == "trade":
+                    trade_results[key] = response
+
+        for country in countries:
+            market = market_profiles[country]
+            sources.append(_source_from_response("worldbank", market, "World Bank market profile"))
+            if market.fallback_used:
+                fallback_providers.add("worldbank")
+
+        for spec in signal_specs:
+            country = spec["country"]
+            competitors = competitor_results[spec["competitor_key"]]
+            content = content_results[spec["content_key"]]
+            trade = trade_results[spec["trade_key"]]
+            market = market_profiles[country]
+
+            if spec["signal_key"] != competitor_first_signal[spec["competitor_key"]]:
+                local_cache_hit_count += 1
+                if bool(getattr(competitors, "fallback_used", False)):
+                    local_fallback_hit_count += 1
+                _record_data_collection_cache_hit("etsy", "search_competitors", competitors, country)
+            if spec["signal_key"] != content_first_signal[spec["content_key"]]:
+                local_cache_hit_count += 1
+                if bool(getattr(content, "fallback_used", False)):
+                    local_fallback_hit_count += 1
+                _record_data_collection_cache_hit("data_source_service", "content_trends", content, country)
+            if spec["signal_key"] != trade_first_signal[spec["trade_key"]]:
+                local_cache_hit_count += 1
+                if bool(getattr(trade, "fallback_used", False)):
+                    local_fallback_hit_count += 1
+                _record_data_collection_cache_hit("un_comtrade", "trade_data", trade, country)
+
+            trade_fallback_reason = getattr(trade, "fallback_reason", None)
+            if trade_fallback_reason in {"provider_timeout", "provider_unavailable"}:
+                fallback_reasons.add(str(trade_fallback_reason))
+
+            raw_signals[spec["signal_key"]] = {
+                "product": spec["product"],
+                "country": country,
+                "competitors": competitors,
+                "content": content,
+                "market": market,
+                "trade": trade,
+            }
+            summaries.append(
+                {
+                    "product_id": spec["product"]["id"],
+                    "country": country,
+                    "competitor_items": len(competitors.items),
+                    "content_items": len(content.items),
+                    "market_indicators": len(market.indicators),
+                    "trade_records": len(trade.records),
+                }
+            )
+            for provider, response, label in (
+                ("etsy", competitors, "Etsy competitor search"),
+                ("data_source_service", content, "Unified content trends"),
+                ("un_comtrade", trade, "UN Comtrade trade data"),
+            ):
+                sources.append(_source_from_response(provider, response, label))
+                if bool(getattr(response, "fallback_used", False)):
+                    fallback_providers.add(provider)
+
+        performance_counts = step_performance_counts(context.state, self.step.step_id)
+        provider_call_count = max(performance_counts["provider_call_count"], len(job_entries))
+        cache_hit_count = performance_counts["cache_hit_count"] or local_cache_hit_count
+        fallback_count = performance_counts["fallback_count"] or (
+            sum(1 for source in sources if source.get("fallback_used")) + local_fallback_hit_count
+        )
+        timeout_count = performance_counts["timeout_count"]
 
         return StepResult(
             output_summary={
                 "provider_call_count": provider_call_count,
+                "cache_hit_count": cache_hit_count,
+                "fallback_count": fallback_count,
+                "timeout_count": timeout_count,
+                "concurrency": concurrency,
+                "local_cache_hit_count": local_cache_hit_count,
                 "fallback_providers": sorted(fallback_providers),
+                "fallback_reasons": sorted(fallback_reasons),
                 "record_count": sum(
                     item["competitor_items"] + item["content_items"] + item["market_indicators"] + item["trade_records"]
                     for item in summaries
@@ -690,8 +868,41 @@ class DataCollectionAgent(BaseWorkflowAgent):
             state_updates={"raw_signals": raw_signals, "data_collection_summary": summaries},
             sources=sources,
             fallback_used=bool(fallback_providers),
-            fallback_reason="One or more provider calls used cache/CSV fallback." if fallback_providers else None,
+            fallback_reason=_provider_fallback_reason(fallback_reasons, fallback_providers),
         )
+
+    async def _provider_job(
+        self,
+        semaphore: asyncio.Semaphore,
+        *,
+        provider: str,
+        endpoint: str,
+        country: str,
+        fallback_reasons: set[str],
+        call: Any,
+        fallback: Any,
+    ) -> Any:
+        async with semaphore:
+            started_at = datetime.now(timezone.utc)
+            start = perf_counter()
+            try:
+                return await call()
+            except Exception as exc:
+                timeout = is_timeout_error(exc)
+                reason = "provider_timeout" if timeout else "provider_unavailable"
+                fallback_reasons.add(reason)
+                record_provider_call(
+                    provider=provider,
+                    endpoint=endpoint,
+                    status="timeout" if timeout else "fallback",
+                    started_at=started_at,
+                    duration_ms=max(0, round((perf_counter() - start) * 1000)),
+                    fallback_used=True,
+                    timeout=timeout,
+                    country=country,
+                    fallback_reason=reason,
+                )
+                return fallback(reason)
 
 
 class CompetitorAnalysisAgent(BaseWorkflowAgent):
@@ -869,36 +1080,29 @@ class MarketingPrepAgent(BaseWorkflowAgent):
 
     async def run(self, context: WorkflowContext) -> StepResult:
         score_rows = _opportunity_scores(context.db, context.analysis_run.id)[:3]
-        assets: list[dict[str, Any]] = []
-        ai_fallback_used = False
+        asset_contexts: list[tuple[OpportunityScore, Product, str, list[str]]] = []
         for row in score_rows:
             product = context.db.get(Product, row.product_id)
             if product is None:
                 continue
             target_language = "ja" if row.country.upper().startswith("JP") else "en"
             keywords = _keywords_for_product(context.db, product)[:5]
-            try:
-                copy = await _marketing_copy(
+            asset_contexts.append((row, product, target_language, keywords))
+
+        results = await asyncio.gather(
+            *(
+                _marketing_asset_for_score(
                     context.ai_client,
-                    product_name=product.product_name_en or product.product_name_cn,
-                    product_description=product.description,
-                    country=row.country,
+                    row=row,
+                    product=product,
                     target_language=target_language,
                     keywords=keywords,
-                    selling_points=_selling_points_from_score(row),
                 )
-            except (BailianError, AiJsonParseError, ValidationError, ValueError, TypeError):
-                mark_latest_qwen_fallback("marketing_copy")
-                ai_fallback_used = True
-                copy = _fallback_marketing_copy(product, row.country, keywords)
-            assets.append(
-                {
-                    "product_id": product.id,
-                    "country": row.country,
-                    "target_language": target_language,
-                    **copy.model_dump(mode="json"),
-                }
+                for row, product, target_language, keywords in asset_contexts
             )
+        )
+        assets = [asset for asset, _fallback_used in results]
+        ai_fallback_used = any(fallback_used for _asset, fallback_used in results)
 
         return StepResult(
             output_summary={"asset_count": len(assets), "ai_fallback_used": ai_fallback_used},
@@ -929,6 +1133,52 @@ class ReportPrepAgent(BaseWorkflowAgent):
             )
         except ReportGenerationInputError as exc:
             raise WorkflowInputError(str(exc), code=exc.code) from exc
+        except Exception as exc:
+            context.db.rollback()
+            next_page_url = NEXT_PAGE_URL_TEMPLATE.format(analysis_id=context.analysis_run.id)
+            state = dict(context.analysis_run.workflow_state or context.state)
+            if isinstance(context.state.get("performance"), dict):
+                state["performance"] = context.state["performance"]
+            reports = [dict(item) for item in state.get("reports", []) if isinstance(item, dict)]
+            reports = [item for item in reports if item.get("generation_status") != "retry_available"]
+            reports.append(
+                {
+                    "id": None,
+                    "title": "Report generation entry",
+                    "analysis_id": context.analysis_run.id,
+                    "next_page_url": next_page_url,
+                    "list_page_url": next_page_url,
+                    "ai_fallback_used": True,
+                    "generation_status": "retry_available",
+                    "message": "Report generation failed; retry from the reports page.",
+                }
+            )
+            context.state = state
+            return StepResult(
+                output_summary={
+                    "report_id": None,
+                    "section_count": 0,
+                    "markdown_length": 0,
+                    "html_length": 0,
+                    "ai_fallback_used": True,
+                    "reused_existing": False,
+                    "retry_available": True,
+                    "error_message": redact_text(str(exc)) or "Report generation failed.",
+                },
+                state_updates={"reports": reports, "next_page_url": next_page_url},
+                sources=[
+                    _source(
+                        "bailian",
+                        "AI fallback template",
+                        "ai_fallback",
+                        True,
+                        False,
+                        "Report generation failed before persistence; reports page can regenerate.",
+                    )
+                ],
+                fallback_used=True,
+                fallback_reason="Report generation failed before persistence; retry is available.",
+            )
 
         report = outcome.report
         next_page_url = NEXT_PAGE_URL_TEMPLATE.format(analysis_id=context.analysis_run.id)
@@ -1186,6 +1436,68 @@ def _product_country_key(product_id: int, country: str) -> str:
     return f"{product_id}:{country.upper()}"
 
 
+def _data_collection_text_key(value: str) -> str:
+    return " ".join(str(value or "").strip().split()).casefold()
+
+
+def _data_collection_hs_key(value: str) -> str:
+    normalized = str(value or "").strip().upper()
+    return normalized or "TOTAL"
+
+
+def _record_data_collection_cache_hit(provider: str, endpoint: str, response: Any, country: str) -> None:
+    record_provider_cache_hit(
+        provider=provider,
+        endpoint=endpoint,
+        started_at=datetime.now(timezone.utc),
+        fallback_used=bool(getattr(response, "fallback_used", False)),
+        country=country,
+        fallback_reason=getattr(response, "fallback_reason", None),
+    )
+
+
+def _empty_market_profile_response(country: str) -> WorldBankCountryResponse:
+    return WorldBankCountryResponse(country_code=country, indicators=[], fallback_used=True)
+
+
+def _empty_competitor_response(keyword: str, country: str) -> DataSourceCompetitorSearchResponse:
+    return DataSourceCompetitorSearchResponse(
+        keyword=keyword,
+        country=country,
+        items=[],
+        fallback_used=True,
+        sources=["CSV fallback unavailable"],
+    )
+
+
+def _empty_content_response(keyword: str, country: str) -> DataSourceContentTrendResponse:
+    return DataSourceContentTrendResponse(
+        keyword=keyword,
+        country=country,
+        items=[],
+        fallback_used=True,
+        sources=["CSV fallback unavailable"],
+    )
+
+
+def _empty_trade_response(
+    hs_code: str,
+    country: str,
+    *,
+    fallback_reason: str,
+) -> UnComtradeTradeFlowResponse:
+    return UnComtradeTradeFlowResponse(
+        hs_code=hs_code,
+        reporter="CHN",
+        partner=country,
+        flow="export",
+        records=[],
+        fallback_used=True,
+        auth_mode="fallback",
+        fallback_reason=fallback_reason,
+    )
+
+
 def _source(
     provider: str,
     label: str,
@@ -1214,6 +1526,16 @@ def _source_from_response(provider: str, response: Any, label: str) -> dict[str,
         not fallback_used,
         "Provider response was normalized by DataSourceService.",
     )
+
+
+def _provider_fallback_reason(fallback_reasons: set[str], fallback_providers: set[str]) -> str | None:
+    if "provider_timeout" in fallback_reasons:
+        return "provider_timeout"
+    if "provider_unavailable" in fallback_reasons:
+        return "provider_unavailable"
+    if fallback_providers:
+        return "One or more provider calls used cache/CSV fallback."
+    return None
 
 
 def _with_provider_summary(state: dict[str, Any]) -> dict[str, Any]:
@@ -1488,6 +1810,41 @@ def _datetime_delta_ms(started_at: datetime, finished_at: datetime) -> int:
     return max(0, round((finish - start).total_seconds() * 1000))
 
 
+async def _marketing_asset_for_score(
+    ai_client: BailianClient,
+    *,
+    row: OpportunityScore,
+    product: Product,
+    target_language: str,
+    keywords: list[str],
+) -> tuple[dict[str, Any], bool]:
+    fallback_used = False
+    try:
+        copy = await _marketing_copy(
+            ai_client,
+            product_name=product.product_name_en or product.product_name_cn,
+            product_description=product.description,
+            country=row.country,
+            target_language=target_language,
+            keywords=keywords,
+            selling_points=_selling_points_from_score(row),
+        )
+    except (BailianError, AiJsonParseError, ValidationError, ValueError, TypeError, TimeoutError) as exc:
+        mark_latest_qwen_fallback("marketing_copy_timeout" if is_timeout_error(exc) else "marketing_copy")
+        fallback_used = True
+        copy = _fallback_marketing_copy(product, row.country, keywords)
+
+    return (
+        {
+            "product_id": product.id,
+            "country": row.country,
+            "target_language": target_language,
+            **copy.model_dump(mode="json"),
+        },
+        fallback_used,
+    )
+
+
 async def _marketing_copy(
     ai_client: BailianClient,
     *,
@@ -1508,7 +1865,9 @@ async def _marketing_copy(
         "keywords": keywords,
         "selling_points": selling_points,
     }
-    result = await ai_client.chat(build_marketing_copy_messages(payload), temperature=0.5, max_tokens=1000, json_mode=True)
+    result = await wait_for_qwen(
+        ai_client.chat(build_marketing_copy_messages(payload), temperature=0.5, max_tokens=1000, json_mode=True)
+    )
     return MarketingCopyResponse.model_validate(parse_json_object(result.content))
 
 

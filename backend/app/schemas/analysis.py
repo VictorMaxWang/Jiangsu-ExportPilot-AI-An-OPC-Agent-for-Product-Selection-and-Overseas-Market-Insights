@@ -121,6 +121,7 @@ class AnalysisPerformanceEvent(BaseModel):
     cache_hit: bool = False
     fallback_used: bool = False
     timeout: bool = False
+    timeout_count: int = Field(default=0, ge=0)
     country: str | None = None
     year: int | None = Field(default=None, ge=0)
     auth_mode: str | None = None

@@ -135,7 +135,7 @@ The JSON object must contain exactly:
 }
 Rules:
 - Keep the required title and all required numbered sections exactly as provided.
-- Use only the structured report_input and deterministic_markdown supplied by the backend.
+- Use only the compact structured report_input supplied by the backend: top scores, core source lineage, marketing summaries, and risk/action notes.
 - Do not invent or modify scores, ranks, prices, quantities, years, countries, products, providers, source labels, fallback flags, or API invocation status.
 - Do not claim real sales, sales forecasts, GMV, profit forecasts, bestseller status, platform rankings, verified transaction value, guaranteed conversion, customs certainty, tariff certainty, or certification validity.
 - If evidence is sample-based, fallback-based, incomplete, or AI fallback, state that limitation conservatively.

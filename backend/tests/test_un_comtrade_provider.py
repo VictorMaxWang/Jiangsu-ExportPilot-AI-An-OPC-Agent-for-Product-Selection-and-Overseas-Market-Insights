@@ -181,6 +181,7 @@ def test_un_comtrade_trade_flow_does_not_retry_429_with_key() -> None:
     assert len(requests) == 1
     assert result.fallback_used is True
     assert result.auth_mode == "fallback"
+    assert result.fallback_reason == "provider_unavailable"
     assert "quota-fake-key" not in result.model_dump_json()
 
 
@@ -199,6 +200,7 @@ def test_un_comtrade_trade_flow_falls_back_without_key(status_code: int) -> None
 
     assert result.fallback_used is True
     assert result.auth_mode == "fallback"
+    assert result.fallback_reason == "provider_unavailable"
     assert result.reporter == "CHN"
     assert result.partner == "USA"
     assert result.records
@@ -227,8 +229,53 @@ def test_un_comtrade_trade_flow_disabled_uses_csv_fallback_without_request() -> 
     assert calls == 0
     assert result.fallback_used is True
     assert result.auth_mode == "fallback"
+    assert result.fallback_reason == "provider_unavailable"
     assert result.records[0].trade_value_usd == Decimal("1342000000")
     assert "disabled-fake-key" not in result.model_dump_json()
+
+
+def test_un_comtrade_trade_flow_falls_back_with_timeout_reason() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("request timed out")
+
+    provider = UnComtradeProvider(
+        settings=Settings(enable_un_comtrade=True, un_comtrade_api_key="timeout-fake-key"),
+        transport=httpx.MockTransport(handler),
+        seed_dir=SEED_DIR,
+    )
+
+    result = asyncio.run(provider.get_trade_flow(hs_code="6302", start_year=2023, end_year=2024))
+
+    assert result.fallback_used is True
+    assert result.auth_mode == "fallback"
+    assert result.fallback_reason == "provider_timeout"
+    assert result.records
+    assert all(record.source == "csv_fallback" for record in result.records)
+    assert "timeout-fake-key" not in result.model_dump_json()
+
+
+def test_un_comtrade_trade_flow_overall_timeout_does_not_wait_per_year() -> None:
+    calls = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.1)
+        return httpx.Response(200, json={"data": [{"period": "2024", "primaryValue": 1}], "error": ""})
+
+    provider = UnComtradeProvider(
+        settings=Settings(enable_un_comtrade=True, un_comtrade_api_key=None),
+        timeout_seconds=0.01,
+        transport=httpx.MockTransport(handler),
+        seed_dir=SEED_DIR,
+    )
+
+    result = asyncio.run(provider.get_trade_flow(hs_code="6302", start_year=2020, end_year=2024))
+
+    assert calls == 1
+    assert result.fallback_used is True
+    assert result.fallback_reason == "provider_timeout"
+    assert result.records
 
 
 @pytest.mark.parametrize(
@@ -253,6 +300,7 @@ def test_un_comtrade_trade_flow_falls_back_on_invalid_or_empty_response(response
 
     assert result.fallback_used is True
     assert result.auth_mode == "fallback"
+    assert result.fallback_reason == "provider_unavailable"
     assert result.records
     assert "invalid-fake-key" not in result.model_dump_json()
 

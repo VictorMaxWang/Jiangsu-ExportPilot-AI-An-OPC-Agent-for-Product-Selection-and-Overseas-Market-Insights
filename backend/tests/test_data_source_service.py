@@ -239,7 +239,7 @@ def test_force_live_bypasses_fresh_un_comtrade_cache(db_session: Session) -> Non
         DataSourceCache(
             provider="un_comtrade",
             endpoint="trade_data",
-            query="category:cotton bedding|hs:630221",
+            query="hs:630221|years:2020-2024",
             country="US",
             response_payload={
                 "provider": "un_comtrade",
@@ -250,6 +250,7 @@ def test_force_live_bypasses_fresh_un_comtrade_cache(db_session: Session) -> Non
                 "records": [{"year": 2023, "trade_value_usd": "1", "quantity": "1", "source": "csv_fallback"}],
                 "fallback_used": True,
                 "auth_mode": "fallback",
+                "fallback_reason": "provider_unavailable",
             },
             fallback_used=True,
             source="csv_fallback",
@@ -292,20 +293,59 @@ def test_etsy_fallback_uses_full_competitor_samples_and_is_cached(db_session: Se
     assert _log_statuses(db_session) == ["fallback", "cache_hit"]
 
 
-def test_un_comtrade_fallback_is_cached(db_session: Session) -> None:
+def test_un_comtrade_fallback_is_cached_by_hs_country_and_year_range(db_session: Session) -> None:
     provider = FailingUnComtradeProvider()
     service = DataSourceService(db_session, un_comtrade_provider=provider)
 
-    first = asyncio.run(service.get_trade_data("cotton bedding", country="US"))
-    second = asyncio.run(service.get_trade_data(" cotton   bedding ", country="us"))
+    first = asyncio.run(service.get_trade_data("cotton bedding", hs_code="630221", country="US"))
+    second = asyncio.run(service.get_trade_data("dorm room bedding", hs_code="630221", country="us"))
 
     assert first.fallback_used is True
     assert first.auth_mode == "fallback"
+    assert first.fallback_reason == "provider_unavailable"
     assert first.hs_code == "630221"
     assert {record.year for record in first.records} == {2020, 2021, 2022, 2023, 2024}
     assert second.records[0].trade_value_usd == first.records[0].trade_value_usd
+    assert second.fallback_reason == "provider_unavailable"
     assert provider.calls == 1
     assert _cache_providers(db_session) == {"un_comtrade"}
+    cache = db_session.scalar(select(DataSourceCache).where(DataSourceCache.provider == "un_comtrade"))
+    assert cache is not None
+    assert cache.query == "hs:630221|years:2020-2024"
+    assert _log_statuses(db_session) == ["fallback", "cache_hit"]
+
+
+def test_un_comtrade_timeout_records_fallback_reason_and_cache_event(db_session: Session) -> None:
+    provider = TimeoutUnComtradeProvider()
+    service = DataSourceService(db_session, un_comtrade_provider=provider)
+    state: dict[str, object] = {}
+
+    async def run_calls() -> None:
+        with analysis_performance_scope(AnalysisPerformanceRecorder(state), "data_collection"):
+            await service.get_trade_data("cotton bedding", hs_code="630221", country="US")
+            await service.get_trade_data("dorm room bedding", hs_code="630221", country="US")
+
+    asyncio.run(run_calls())
+
+    events = [event for event in get_performance_events(state) if event.get("type") == "provider"]
+    assert [event["status"] for event in events] == ["fallback", "cache_hit"]
+    assert events[0]["provider"] == "un_comtrade"
+    assert events[0]["fallback_used"] is True
+    assert events[0]["fallback_reason"] == "provider_timeout"
+    assert events[0]["timeout"] is True
+    assert events[0]["timeout_count"] == 1
+    assert events[0]["duration_ms"] >= 0
+    assert events[1]["cache_hit"] is True
+    assert events[1]["fallback_used"] is True
+    assert events[1]["fallback_reason"] == "provider_timeout"
+    assert events[1]["timeout"] is False
+    assert events[1]["timeout_count"] == 0
+    assert provider.calls == 1
+
+    counts = step_performance_counts(state, "data_collection")
+    assert counts["timeout_count"] == 1
+    assert counts["cache_hit_count"] == 1
+    assert counts["fallback_count"] == 2
 
 
 def test_content_trends_survives_provider_failures(db_session: Session) -> None:
@@ -473,6 +513,23 @@ class FailingUnComtradeProvider:
     ) -> object:
         self.calls += 1
         raise RuntimeError("subscription-key fake-key unavailable")
+
+
+class TimeoutUnComtradeProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def get_trade_flow(
+        self,
+        reporter: str = "CHN",
+        partner: str = "USA",
+        hs_code: str = "6302",
+        flow: str = "export",
+        start_year: int = 2020,
+        end_year: int = 2024,
+    ) -> object:
+        self.calls += 1
+        raise TimeoutError("UN Comtrade provider timeout")
 
 
 class LiveUnComtradeProvider:

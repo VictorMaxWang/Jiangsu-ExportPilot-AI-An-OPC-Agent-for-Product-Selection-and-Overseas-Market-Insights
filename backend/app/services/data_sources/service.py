@@ -178,7 +178,9 @@ class DataSourceService:
         return await self._cached_call(
             provider="un_comtrade",
             endpoint="trade_data",
-            query_key=f"category:{normalized_category}|hs:{normalized_hs_code}",
+            query_key=(
+                f"hs:{normalized_hs_code}|years:{DEFAULT_TRADE_START_YEAR}-{DEFAULT_TRADE_END_YEAR}"
+            ),
             country_key=normalized_country,
             response_model=UnComtradeTradeFlowResponse,
             query_log={
@@ -286,8 +288,15 @@ class DataSourceService:
                 start_year=DEFAULT_TRADE_START_YEAR,
                 end_year=DEFAULT_TRADE_END_YEAR,
             )
-        except Exception:
-            return _fallback_trade_data(product_category, hs_code, country, self._seed_dir)
+        except Exception as exc:
+            fallback_reason = "provider_timeout" if is_timeout_error(exc) else "provider_unavailable"
+            return _fallback_trade_data(
+                product_category,
+                hs_code,
+                country,
+                self._seed_dir,
+                fallback_reason=fallback_reason,
+            )
 
     async def _get_content_trends_uncached(
         self,
@@ -382,6 +391,7 @@ class DataSourceService:
         cached = None if force_live else self._read_cache(provider, endpoint, query_key, country_key, response_model)
         if cached is not None:
             duration_ms = _elapsed_ms(start)
+            fallback_reason = _response_fallback_reason(cached)
             self._write_log(
                 provider=provider,
                 endpoint=endpoint,
@@ -400,6 +410,7 @@ class DataSourceService:
                 cache_hit=True,
                 fallback_used=bool(getattr(cached, "fallback_used", False)),
                 country=country_key,
+                fallback_reason=fallback_reason,
             )
             return cached
 
@@ -419,6 +430,7 @@ class DataSourceService:
             raise
 
         fallback_used = bool(getattr(response, "fallback_used", False))
+        fallback_reason = _response_fallback_reason(response)
         source = _response_source(response)
         self._write_cache(provider, endpoint, query_key, country_key, response, fallback_used, source)
         duration_ms = _elapsed_ms(start)
@@ -438,7 +450,9 @@ class DataSourceService:
             started_at=started_at,
             duration_ms=duration_ms,
             fallback_used=fallback_used,
+            timeout=fallback_reason == "provider_timeout",
             country=country_key,
+            fallback_reason=fallback_reason,
         )
         return response
 
@@ -682,6 +696,8 @@ def _fallback_trade_data(
     hs_code: str,
     country: str,
     seed_dir: Path,
+    *,
+    fallback_reason: str | None = None,
 ) -> UnComtradeTradeFlowResponse:
     partner = _trade_partner_code(country)
     rows = [
@@ -719,6 +735,7 @@ def _fallback_trade_data(
         records=records,
         fallback_used=True,
         auth_mode="fallback",
+        fallback_reason=fallback_reason,
     )
 
 
@@ -914,6 +931,13 @@ def _response_source(response: BaseModel) -> str:
     if bool(getattr(response, "fallback_used", False)):
         return CSV_FALLBACK_SOURCE
     return API_SOURCE
+
+
+def _response_fallback_reason(response: BaseModel) -> str | None:
+    reason = getattr(response, "fallback_reason", None)
+    if reason in {"provider_timeout", "provider_unavailable"}:
+        return str(reason)
+    return None
 
 
 def _safe_query_json(query: dict[str, object]) -> str:

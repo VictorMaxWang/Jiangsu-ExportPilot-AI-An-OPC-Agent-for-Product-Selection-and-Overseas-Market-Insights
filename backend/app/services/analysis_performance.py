@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -132,6 +133,18 @@ class PerformanceBailianClient:
         json_mode = bool(kwargs.get("json_mode", False))
         try:
             result = await call(*args, **kwargs)
+        except asyncio.CancelledError:
+            record_qwen_call(
+                operation=operation,
+                model=model,
+                status="timeout",
+                started_at=started_at,
+                duration_ms=_elapsed_ms(start),
+                json_mode=json_mode,
+                timeout=True,
+                fallback_used=False,
+            )
+            raise
         except Exception as exc:
             timeout = is_timeout_error(exc)
             record_qwen_call(
@@ -187,6 +200,7 @@ def record_provider_call(
     fallback_used: bool = False,
     timeout: bool = False,
     country: str | None = None,
+    fallback_reason: str | None = None,
 ) -> None:
     _record_current(
         {
@@ -201,6 +215,35 @@ def record_provider_call(
             "fallback_used": fallback_used,
             "timeout": timeout,
             "country": country,
+            "fallback_reason": fallback_reason,
+        }
+    )
+
+
+def record_provider_cache_hit(
+    *,
+    provider: str,
+    endpoint: str,
+    started_at: datetime,
+    duration_ms: int = 0,
+    fallback_used: bool = False,
+    country: str | None = None,
+    fallback_reason: str | None = None,
+) -> None:
+    _record_current(
+        {
+            "type": "provider_cache",
+            "provider": provider,
+            "endpoint": endpoint,
+            "status": "cache_hit",
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "duration_ms": duration_ms,
+            "cache_hit": True,
+            "fallback_used": fallback_used,
+            "timeout": False,
+            "country": country,
+            "fallback_reason": fallback_reason,
         }
     )
 
@@ -337,6 +380,7 @@ def _safe_event(event: dict[str, Any]) -> dict[str, Any]:
         "cache_hit": bool(event.get("cache_hit")),
         "fallback_used": bool(event.get("fallback_used")),
         "timeout": bool(event.get("timeout")),
+        "timeout_count": _safe_timeout_count(event),
     }
     for key, limit in (
         ("country", 8),
@@ -379,6 +423,12 @@ def _safe_int(value: object) -> int:
 
 def _event_bool(event: dict[str, Any], key: str) -> bool:
     return event.get(key) is True
+
+
+def _safe_timeout_count(event: dict[str, Any]) -> int:
+    if event.get("timeout_count") is not None:
+        return _safe_int(event.get("timeout_count"))
+    return 1 if bool(event.get("timeout")) or event.get("status") == "timeout" else 0
 
 
 def _elapsed_ms(start: float) -> int:

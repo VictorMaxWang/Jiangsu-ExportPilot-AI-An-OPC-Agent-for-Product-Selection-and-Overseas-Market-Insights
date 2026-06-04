@@ -104,7 +104,7 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
         setReports((current) => [report, ...current.filter((item) => item.id !== report.id)]);
       }
     } catch (requestError) {
-      setError(getFriendlyErrorMessage(requestError));
+      setError(withReportRetryMessage(getFriendlyErrorMessage(requestError)));
     } finally {
       setGenerating(false);
     }
@@ -290,4 +290,8 @@ function formatScore(value: string | number | null | undefined): string {
 function formatDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function withReportRetryMessage(message: string): string {
+  return message.includes("可重新生成报告") ? message : `报告生成失败，可重新生成报告。${message}`;
 }

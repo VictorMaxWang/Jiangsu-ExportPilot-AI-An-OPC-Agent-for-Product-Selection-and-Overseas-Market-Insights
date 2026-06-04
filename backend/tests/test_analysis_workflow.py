@@ -4,17 +4,36 @@ import asyncio
 import json
 from collections.abc import Generator
 from decimal import Decimal
+from time import perf_counter
 
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import get_settings
 from app.db.base import Base
 from app.models import Company, OpportunityScore, Product, ProductDraft, ProductImportJob, ProductKeyword, Report
-from app.schemas import AnalysisRunRequest
+from app.schemas import (
+    AnalysisRunRequest,
+    DataSourceCompetitorItem,
+    DataSourceCompetitorSearchResponse,
+    DataSourceContentTrendItem,
+    DataSourceContentTrendResponse,
+    UnComtradeTradeFlowResponse,
+    UnComtradeTradeRecord,
+    WorldBankCountryResponse,
+    WorldBankIndicatorItem,
+)
 from app.services.agents import ExportInsightWorkflow
+from app.services.agents.export_insight_workflow import DataCollectionAgent, WorkflowContext
 from app.services.ai import BailianChatCompletion, BailianTimeoutError
+from app.services.analysis_performance import (
+    AnalysisPerformanceRecorder,
+    analysis_performance_scope,
+    get_performance_events,
+    step_performance_counts,
+)
 from app.services.data_sources import DataSourceService
 
 
@@ -75,6 +94,18 @@ def test_export_insight_workflow_completes_with_provider_and_ai_fallback(
     assert performance.provider_summary
     assert performance.qwen_summary
     assert any(step.step_id == "03_data_collection" and step.provider_call_count > 0 for step in performance.steps)
+    assert any(
+        step.step_id == "03_data_collection"
+        and step.status == "fallback_used"
+        and step.fallback_reason == "provider_unavailable"
+        for step in status.step_logs
+    )
+    assert any(
+        event.provider == "un_comtrade"
+        and event.status == "fallback"
+        and event.fallback_reason == "provider_unavailable"
+        for event in performance.events
+    )
     assert any(step.step_id == "07_opportunity_scoring" and step.provider_call_count > 0 for step in performance.steps)
     assert all(step.provider_call_count >= 0 for step in performance.steps)
 
@@ -217,6 +248,258 @@ def test_workflow_records_qwen_timeout_count(
     assert any(step.qwen_call_count > 0 and step.timeout_count > 0 for step in performance.steps)
 
 
+def test_report_qwen_timeout_uses_fallback_report_and_completes(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    monkeypatch.setenv("BAILIAN_TIMEOUT_SECONDS", "0.01")
+    get_settings.cache_clear()
+    company_id, product_id = _seed_product(db_session)
+    workflow = ExportInsightWorkflow(
+        db_session,
+        _failing_data_source_service(db_session),
+        ai_client=SlowReportAiClient(),
+    )
+    analysis_run = workflow.create_run(
+        AnalysisRunRequest(
+            company_id=company_id,
+            product_ids=[product_id],
+            target_countries=["US"],
+            competitor_limit=8,
+        )
+    )
+
+    try:
+        status = asyncio.run(workflow.run(analysis_run.id))
+    finally:
+        get_settings.cache_clear()
+
+    assert status is not None
+    assert status.status == "fallback_used"
+    assert status.finished_at is not None
+    assert status.current_step == "09_report_prep"
+    step = _step_log(status, "09_report_prep")
+    assert step.status == "fallback_used"
+    assert step.fallback_used is True
+    assert step.timeout_count > 0
+    assert step.fallback_count > 0
+    assert step.output_summary["ai_fallback_used"] is True
+
+    report = db_session.scalar(select(Report).where(Report.analysis_id == analysis_run.id))
+    assert report is not None
+    assert report.content_markdown is not None
+    assert "qwen3.6-plus" in report.content_markdown
+    assert report.content_html is not None
+
+    performance = workflow.performance(analysis_run.id)
+    assert performance is not None
+    assert any(
+        event.type == "qwen"
+        and event.step_id == "09_report_prep"
+        and event.timeout
+        and event.fallback_used
+        for event in performance.events
+    )
+
+
+def test_report_prep_unrecoverable_error_adds_retry_entry_and_completes(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    company_id, product_id = _seed_product(db_session)
+
+    async def fail_generate(self: object, analysis_id: int, *, force_regenerate: bool = False) -> object:
+        raise RuntimeError("renderer unavailable")
+
+    monkeypatch.setattr(
+        "app.services.agents.export_insight_workflow.ReportGenerator.generate_from_analysis",
+        fail_generate,
+    )
+    workflow = ExportInsightWorkflow(
+        db_session,
+        _failing_data_source_service(db_session),
+        ai_client=BadJsonAiClient(),
+    )
+    analysis_run = workflow.create_run(
+        AnalysisRunRequest(
+            company_id=company_id,
+            product_ids=[product_id],
+            target_countries=["US"],
+            competitor_limit=8,
+        )
+    )
+
+    status = asyncio.run(workflow.run(analysis_run.id))
+
+    assert status is not None
+    assert status.status == "fallback_used"
+    assert status.finished_at is not None
+    assert status.next_page_url == f"/reports?analysis_id={analysis_run.id}"
+    step = _step_log(status, "09_report_prep")
+    assert step.status == "fallback_used"
+    assert step.fallback_used is True
+    assert step.output_summary["retry_available"] is True
+
+    report_count = db_session.scalar(
+        select(func.count()).select_from(Report).where(Report.analysis_id == analysis_run.id)
+    )
+    assert report_count == 0
+    refreshed_run = db_session.get(type(analysis_run), analysis_run.id)
+    assert refreshed_run is not None
+    reports = (refreshed_run.workflow_state or {}).get("reports")
+    assert isinstance(reports, list)
+    assert reports[-1]["generation_status"] == "retry_available"
+    assert reports[-1]["next_page_url"] == f"/reports?analysis_id={analysis_run.id}"
+
+
+def test_marketing_qwen_timeout_uses_fallback_assets_and_completes(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    monkeypatch.setenv("BAILIAN_TIMEOUT_SECONDS", "0.01")
+    get_settings.cache_clear()
+    company_id, product_id = _seed_product(db_session)
+    workflow = ExportInsightWorkflow(
+        db_session,
+        _failing_data_source_service(db_session),
+        ai_client=SlowMarketingAiClient(),
+    )
+    analysis_run = workflow.create_run(
+        AnalysisRunRequest(
+            company_id=company_id,
+            product_ids=[product_id],
+            target_countries=["US"],
+            competitor_limit=8,
+        )
+    )
+
+    try:
+        status = asyncio.run(workflow.run(analysis_run.id))
+    finally:
+        get_settings.cache_clear()
+
+    assert status is not None
+    assert status.status == "fallback_used"
+    assert status.finished_at is not None
+    step = _step_log(status, "08_marketing_prep")
+    assert step.status == "fallback_used"
+    assert step.fallback_used is True
+    assert step.timeout_count > 0
+    assert step.fallback_count > 0
+    assert step.output_summary["ai_fallback_used"] is True
+
+    refreshed_run = db_session.get(type(analysis_run), analysis_run.id)
+    assert refreshed_run is not None
+    assets = (refreshed_run.workflow_state or {}).get("marketing_assets")
+    assert isinstance(assets, list)
+    assert assets
+    assert assets[0]["product_id"] == product_id
+    assert assets[0]["country"] == "US"
+    assert "listing_title" in assets[0]
+
+    performance = workflow.performance(analysis_run.id)
+    assert performance is not None
+    assert any(
+        event.type == "qwen"
+        and event.step_id == "08_marketing_prep"
+        and event.timeout
+        and event.fallback_used
+        for event in performance.events
+    )
+
+
+def test_parallel_data_collection_preserves_serial_result_structure(monkeypatch: pytest.MonkeyPatch) -> None:
+    profiles = _data_collection_profiles()
+    countries = ["US", "GB"]
+    monkeypatch.setenv("DATA_COLLECTION_CONCURRENCY", "3")
+    get_settings.cache_clear()
+
+    parallel_result, _state, _service = asyncio.run(
+        _run_data_collection_agent(profiles, countries, StubDataCollectionService())
+    )
+    serial_state = asyncio.run(_serial_data_collection_reference(profiles, countries))
+
+    assert parallel_result.state_updates is not None
+    assert _data_collection_shape(parallel_result.state_updates) == _data_collection_shape(serial_state)
+    get_settings.cache_clear()
+
+
+def test_parallel_data_collection_dedupes_provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    profiles = [
+        _data_collection_profile(1, keyword="same throw", hs_code="630140"),
+        _data_collection_profile(2, keyword=" same   throw ", hs_code="630140"),
+    ]
+    monkeypatch.setenv("DATA_COLLECTION_CONCURRENCY", "3")
+    get_settings.cache_clear()
+
+    result, state, service = asyncio.run(_run_data_collection_agent(profiles, ["US"], StubDataCollectionService()))
+
+    assert service.market_calls == ["US"]
+    assert service.competitor_calls == [("same throw", "US", 8)]
+    assert service.content_calls == [("same throw", "US", 20)]
+    assert service.trade_calls == [("Home Textile", "630140", "US")]
+    assert result.output_summary["local_cache_hit_count"] == 3
+    assert result.output_summary["cache_hit_count"] == 3
+    assert step_performance_counts(state, "03_data_collection")["provider_call_count"] == 0
+    assert step_performance_counts(state, "03_data_collection")["cache_hit_count"] == 3
+    get_settings.cache_clear()
+
+
+def test_parallel_data_collection_provider_failure_falls_back_without_failed_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATA_COLLECTION_CONCURRENCY", "3")
+    get_settings.cache_clear()
+
+    result, state, _service = asyncio.run(
+        _run_data_collection_agent(
+            [_data_collection_profile(1, keyword="boho throw", hs_code="630140")],
+            ["US"],
+            StubDataCollectionService(fail_endpoints={"competitors"}),
+        )
+    )
+
+    assert result.state_updates is not None
+    signal = result.state_updates["raw_signals"]["1:US"]
+    assert signal["competitors"].fallback_used is True
+    assert signal["content"].fallback_used is False
+    assert signal["trade"].fallback_used is False
+    assert result.fallback_used is True
+    assert result.fallback_reason == "provider_unavailable"
+    assert result.output_summary["fallback_count"] >= 1
+    assert result.output_summary["timeout_count"] == 0
+    assert any(
+        event.get("provider") == "etsy"
+        and event.get("status") == "fallback"
+        and event.get("fallback_reason") == "provider_unavailable"
+        for event in get_performance_events(state)
+    )
+    get_settings.cache_clear()
+
+
+def test_parallel_data_collection_reduces_slow_provider_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    profiles = [
+        _data_collection_profile(1, keyword="boho throw", hs_code="630140"),
+        _data_collection_profile(2, keyword="cotton bedding", hs_code="630221"),
+    ]
+    countries = ["US", "GB"]
+
+    monkeypatch.setenv("DATA_COLLECTION_CONCURRENCY", "1")
+    get_settings.cache_clear()
+    serial_started = perf_counter()
+    asyncio.run(_run_data_collection_agent(profiles, countries, StubDataCollectionService(delay_seconds=0.03)))
+    serial_duration = perf_counter() - serial_started
+
+    monkeypatch.setenv("DATA_COLLECTION_CONCURRENCY", "3")
+    get_settings.cache_clear()
+    parallel_started = perf_counter()
+    asyncio.run(_run_data_collection_agent(profiles, countries, StubDataCollectionService(delay_seconds=0.03)))
+    parallel_duration = perf_counter() - parallel_started
+
+    assert parallel_duration < serial_duration * 0.75
+    get_settings.cache_clear()
+
+
 @pytest.fixture()
 def db_session() -> Generator[Session, None, None]:
     engine = create_engine(
@@ -269,6 +552,22 @@ class TimeoutAiClient:
         raise BailianTimeoutError("Bailian request timed out.")
 
 
+class SlowReportAiClient(BadJsonAiClient):
+    async def chat(self, messages: list[dict[str, str]], *args: object, **kwargs: object) -> BailianChatCompletion:
+        prompt_text = "\n".join(message.get("content", "") for message in messages)
+        if "content_markdown" in prompt_text and "required_sections" in prompt_text:
+            await asyncio.sleep(0.05)
+        return await super().chat(messages, *args, **kwargs)
+
+
+class SlowMarketingAiClient(BadJsonAiClient):
+    async def chat(self, messages: list[dict[str, str]], *args: object, **kwargs: object) -> BailianChatCompletion:
+        prompt_text = "\n".join(message.get("content", "") for message in messages)
+        if "listing_title" in prompt_text and "localization_notes" in prompt_text:
+            await asyncio.sleep(0.05)
+        return await super().chat(messages, *args, **kwargs)
+
+
 class KeywordThenBadJsonAiClient:
     def __init__(self) -> None:
         self.keyword_calls = 0
@@ -305,6 +604,235 @@ def _failing_data_source_service(db: Session) -> DataSourceService:
     )
 
 
+class StubDataCollectionService:
+    def __init__(
+        self,
+        *,
+        delay_seconds: float = 0,
+        fail_endpoints: set[str] | None = None,
+    ) -> None:
+        self.delay_seconds = delay_seconds
+        self.fail_endpoints = fail_endpoints or set()
+        self.market_calls: list[str] = []
+        self.competitor_calls: list[tuple[str, str, int]] = []
+        self.content_calls: list[tuple[str, str, int]] = []
+        self.trade_calls: list[tuple[str, str, str]] = []
+
+    async def get_market_profile(self, country_code: str) -> WorldBankCountryResponse:
+        await self._maybe_delay()
+        self._maybe_fail("market")
+        country = country_code.strip().upper()
+        self.market_calls.append(country)
+        return WorldBankCountryResponse(
+            country_code=country,
+            indicators=[
+                WorldBankIndicatorItem(
+                    indicator_code="NY.GDP.PCAP.CD",
+                    indicator_name="GDP per capita",
+                    year=2025,
+                    value=50000,
+                    source="api",
+                )
+            ],
+            fallback_used=False,
+        )
+
+    async def search_competitors(
+        self,
+        keyword: str,
+        country: str | None = None,
+        *,
+        limit: int = 20,
+    ) -> DataSourceCompetitorSearchResponse:
+        await self._maybe_delay()
+        self._maybe_fail("competitors")
+        normalized_country = (country or "US").strip().upper()
+        self.competitor_calls.append((keyword, normalized_country, limit))
+        return DataSourceCompetitorSearchResponse(
+            keyword=keyword,
+            country=normalized_country,
+            items=[
+                DataSourceCompetitorItem(
+                    platform="Etsy",
+                    country=normalized_country,
+                    keyword=keyword,
+                    title=f"{keyword} competitor",
+                    price=Decimal("42"),
+                    currency="USD",
+                    source_type="api",
+                )
+            ],
+            fallback_used=False,
+            sources=["Etsy"],
+        )
+
+    async def get_content_trends(
+        self,
+        keyword: str,
+        country: str | None = None,
+        *,
+        limit: int = 20,
+    ) -> DataSourceContentTrendResponse:
+        await self._maybe_delay()
+        self._maybe_fail("content")
+        normalized_country = (country or "US").strip().upper()
+        self.content_calls.append((keyword, normalized_country, limit))
+        return DataSourceContentTrendResponse(
+            keyword=keyword,
+            country=normalized_country,
+            items=[
+                DataSourceContentTrendItem(
+                    platform="YouTube",
+                    country=normalized_country,
+                    keyword=keyword,
+                    title=f"{keyword} trend",
+                    source_type="api",
+                )
+            ],
+            fallback_used=False,
+            sources=["YouTube"],
+        )
+
+    async def get_trade_data(
+        self,
+        product_category: str,
+        hs_code: str | None = None,
+        country: str | None = None,
+    ) -> UnComtradeTradeFlowResponse:
+        await self._maybe_delay()
+        self._maybe_fail("trade")
+        normalized_country = (country or "US").strip().upper()
+        normalized_hs_code = (hs_code or "6302").strip().upper()
+        self.trade_calls.append((product_category, normalized_hs_code, normalized_country))
+        return UnComtradeTradeFlowResponse(
+            hs_code=normalized_hs_code,
+            reporter="CHN",
+            partner=normalized_country,
+            flow="export",
+            records=[
+                UnComtradeTradeRecord(
+                    year=2024,
+                    trade_value_usd=Decimal("999"),
+                    quantity=Decimal("9"),
+                    source="api",
+                )
+            ],
+            fallback_used=False,
+            auth_mode="no_key",
+        )
+
+    async def _maybe_delay(self) -> None:
+        if self.delay_seconds > 0:
+            await asyncio.sleep(self.delay_seconds)
+
+    def _maybe_fail(self, endpoint: str) -> None:
+        if endpoint in self.fail_endpoints:
+            raise RuntimeError(f"{endpoint} unavailable")
+
+
+async def _run_data_collection_agent(
+    profiles: list[dict[str, object]],
+    countries: list[str],
+    service: StubDataCollectionService,
+) -> tuple[object, dict[str, object], StubDataCollectionService]:
+    state: dict[str, object] = {"product_profiles": profiles}
+    context = WorkflowContext(
+        db=None,  # type: ignore[arg-type]
+        analysis_run=None,  # type: ignore[arg-type]
+        request=AnalysisRunRequest(
+            company_id=1,
+            product_ids=[int(profile["id"]) for profile in profiles],
+            target_countries=countries,
+            competitor_limit=8,
+        ),
+        data_sources=service,  # type: ignore[arg-type]
+        ai_client=None,  # type: ignore[arg-type]
+        state=state,
+    )
+    agent = DataCollectionAgent()
+    with analysis_performance_scope(AnalysisPerformanceRecorder(state), agent.step.step_id):
+        result = await agent.run(context)
+    return result, state, service
+
+
+async def _serial_data_collection_reference(
+    profiles: list[dict[str, object]],
+    countries: list[str],
+) -> dict[str, object]:
+    service = StubDataCollectionService()
+    market_profiles: dict[str, WorldBankCountryResponse] = {}
+    raw_signals: dict[str, dict[str, object]] = {}
+    summaries: list[dict[str, object]] = []
+    for country in countries:
+        market_profiles[country] = await service.get_market_profile(country)
+    for product in profiles:
+        keyword = str(product.get("keyword") or product.get("product_name_en") or product.get("product_name_cn"))
+        category = str(product.get("category") or keyword)
+        hs_code = str(product.get("hs_code") or "6302")
+        for country in countries:
+            competitors = await service.search_competitors(keyword, country=country, limit=8)
+            content = await service.get_content_trends(keyword, country=country, limit=20)
+            trade = await service.get_trade_data(category, hs_code=hs_code, country=country)
+            key = f"{int(product['id'])}:{country.upper()}"
+            raw_signals[key] = {
+                "product": product,
+                "country": country,
+                "competitors": competitors,
+                "content": content,
+                "market": market_profiles[country],
+                "trade": trade,
+            }
+            summaries.append(
+                {
+                    "product_id": product["id"],
+                    "country": country,
+                    "competitor_items": len(competitors.items),
+                    "content_items": len(content.items),
+                    "market_indicators": len(market_profiles[country].indicators),
+                    "trade_records": len(trade.records),
+                }
+            )
+    return {"raw_signals": raw_signals, "data_collection_summary": summaries}
+
+
+def _data_collection_shape(state_updates: dict[str, object]) -> dict[str, object]:
+    raw_signals = state_updates["raw_signals"]
+    assert isinstance(raw_signals, dict)
+    return {
+        "raw_signal_keys": list(raw_signals),
+        "summaries": state_updates["data_collection_summary"],
+        "signals": {
+            key: {
+                "product_id": signal["product"]["id"],
+                "country": signal["country"],
+                "competitor_items": len(signal["competitors"].items),
+                "content_items": len(signal["content"].items),
+                "market_indicators": len(signal["market"].indicators),
+                "trade_records": len(signal["trade"].records),
+            }
+            for key, signal in raw_signals.items()
+        },
+    }
+
+
+def _data_collection_profiles() -> list[dict[str, object]]:
+    return [
+        _data_collection_profile(1, keyword="boho throw", hs_code="630140"),
+        _data_collection_profile(2, keyword="cotton bedding", hs_code="630221"),
+    ]
+
+
+def _data_collection_profile(product_id: int, *, keyword: str, hs_code: str) -> dict[str, object]:
+    return {
+        "id": product_id,
+        "product_name_cn": f"Product {product_id}",
+        "product_name_en": keyword.title(),
+        "category": "Home Textile",
+        "keyword": keyword,
+        "hs_code": hs_code,
+    }
+
+
 def _seed_product(db: Session) -> tuple[int, int]:
     company = Company(name="Jiangsu Demo Co", region="Jiangsu", industry="Home Textile")
     db.add(company)
@@ -325,6 +853,10 @@ def _seed_product(db: Session) -> tuple[int, int]:
     db.add(product)
     db.commit()
     return company.id, product.id
+
+
+def _step_log(status: object, step_id: str) -> object:
+    return next(step for step in status.step_logs if step.step_id == step_id)
 
 
 def _seed_imported_product_missing_keywords(db: Session) -> tuple[int, int]:

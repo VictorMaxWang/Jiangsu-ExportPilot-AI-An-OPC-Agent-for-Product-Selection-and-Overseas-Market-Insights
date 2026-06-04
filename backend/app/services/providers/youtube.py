@@ -12,7 +12,13 @@ import httpx
 from app.core.config import Settings, get_settings
 from app.schemas import YoutubeSearchResponse, YoutubeVideoItem
 from app.services.analysis_performance import is_timeout_error, record_provider_http_call
-from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE, DataProviderValidationError
+from app.services.providers import (
+    API_SOURCE,
+    CSV_FALLBACK_SOURCE,
+    DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECONDS,
+    DEFAULT_PROVIDER_TIMEOUT_SECONDS,
+    DataProviderValidationError,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -49,7 +55,7 @@ class YoutubeProvider:
         *,
         settings: Settings | None = None,
         endpoint: str = DEFAULT_ENDPOINT,
-        timeout_seconds: float = 15.0,
+        timeout_seconds: float = DEFAULT_PROVIDER_TIMEOUT_SECONDS,
         transport: httpx.AsyncBaseTransport | None = None,
         seed_dir: Path | None = None,
     ) -> None:
@@ -109,7 +115,7 @@ class YoutubeProvider:
             "regionCode": country,
             "key": self._settings.youtube_data_api_key,
         }
-        timeout = httpx.Timeout(self._timeout_seconds, connect=5.0)
+        timeout = httpx.Timeout(self._timeout_seconds, connect=DEFAULT_PROVIDER_CONNECT_TIMEOUT_SECONDS)
         started_at = datetime.now(timezone.utc)
         start = perf_counter()
         try:

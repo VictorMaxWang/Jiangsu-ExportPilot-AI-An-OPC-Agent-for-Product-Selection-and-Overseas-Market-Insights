@@ -68,7 +68,8 @@ def _output_exception(exc: MarketingGenerationOutputError) -> HTTPException:
     }
     if exc.errors is not None:
         detail["errors"] = redact_mapping(exc.errors)
-    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+    http_status = status.HTTP_504_GATEWAY_TIMEOUT if exc.code == "AI_RESPONSE_TIMEOUT" else status.HTTP_502_BAD_GATEWAY
+    return HTTPException(status_code=http_status, detail=detail)
 
 
 def _bailian_exception(exc: BailianError) -> HTTPException:

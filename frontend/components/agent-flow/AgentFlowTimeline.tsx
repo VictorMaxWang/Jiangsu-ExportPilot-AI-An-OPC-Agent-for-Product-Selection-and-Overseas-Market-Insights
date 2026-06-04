@@ -1,6 +1,7 @@
 "use client";
 
-import type { AnalysisStepLog, AnalysisWorkflowStatus } from "../../app/_lib/api-client";
+import { useI18n } from "../../app/_components/LanguageProvider";
+import type { AnalysisPerformanceStep, AnalysisStepLog, AnalysisWorkflowStatus } from "../../app/_lib/api-client";
 
 export const AGENT_STEP_LABELS: Record<string, string> = {
   "01_company_profiling": "企业画像智能体",
@@ -38,14 +39,18 @@ const AGENT_STEP_DESCRIPTIONS: Record<string, string> = {
   "09_report_prep": "整理报告结构、数据来源说明和可跳转的报告入口。",
 };
 
-const FALLBACK_TEXT = "该步骤使用本地样本数据保障演示稳定。";
+const SLOW_STEP_TEXT = "该步骤耗时较长，系统正在尝试缓存或样本数据兜底。";
 
 type AgentFlowTimelineProps = {
   steps: AnalysisStepLog[];
   currentStepId?: string | null;
+  performanceSteps?: AnalysisPerformanceStep[];
+  now?: number;
 };
 
-export function AgentFlowTimeline({ steps, currentStepId }: AgentFlowTimelineProps) {
+export function AgentFlowTimeline({ steps, currentStepId, performanceSteps = [], now = Date.now() }: AgentFlowTimelineProps) {
+  const { text } = useI18n();
+  const performanceByStepId = new Map(performanceSteps.map((step) => [step.step_id, step]));
   return (
     <div className="grid gap-3">
       {steps.map((step, index) => (
@@ -53,7 +58,10 @@ export function AgentFlowTimeline({ steps, currentStepId }: AgentFlowTimelinePro
           key={step.step_id}
           active={step.step_id === currentStepId}
           index={index + 1}
+          now={now}
+          performanceStep={performanceByStepId.get(step.step_id)}
           step={step}
+          text={text}
         />
       ))}
     </div>
@@ -64,18 +72,37 @@ function AgentFlowStep({
   step,
   index,
   active,
+  performanceStep,
+  now,
+  text,
 }: {
   step: AnalysisStepLog;
   index: number;
   active: boolean;
+  performanceStep?: AnalysisPerformanceStep;
+  now: number;
+  text: (zh: string, en?: string) => string;
 }) {
   const fallbackUsed = step.status === "fallback_used" || step.fallback_used;
   const hasError = step.status === "failed";
+  const elapsedMs = stepElapsedMs(step, performanceStep, now);
+  const durationMs = performanceStep?.duration_ms ?? step.duration_ms;
+  const slowStep = (elapsedMs ?? durationMs ?? 0) > 60_000;
   const summaryItems = outputSummaryItems(step.output_summary);
   const sourceLabels = step.sources
     .map((source) => formatSource(source))
     .filter((source): source is string => Boolean(source))
     .slice(0, 3);
+  const metrics = [
+    { label: text("状态", "Status"), value: statusLabel(step.status, text) },
+    { label: text("已运行时间", "Elapsed"), value: formatDuration(elapsedMs) },
+    { label: "duration_ms", value: formatMilliseconds(durationMs) },
+    { label: "provider_call_count", value: String(countMetric(step.provider_call_count, performanceStep?.provider_call_count)) },
+    { label: "qwen_call_count", value: String(countMetric(step.qwen_call_count, performanceStep?.qwen_call_count)) },
+    { label: "cache_hit_count", value: String(countMetric(step.cache_hit_count, performanceStep?.cache_hit_count)) },
+    { label: "fallback_count", value: String(countMetric(step.fallback_count, performanceStep?.fallback_count)) },
+    { label: "timeout_count", value: String(countMetric(step.timeout_count, performanceStep?.timeout_count)) },
+  ];
 
   return (
     <article
@@ -100,13 +127,18 @@ function AgentFlowStep({
             </p>
           </div>
         </div>
-        <StatusBadge status={step.status} />
+        <StatusBadge status={step.status} text={text} />
       </div>
 
-      <div className="mt-4 grid gap-3 text-xs text-slate-500 sm:grid-cols-3">
-        <MetaItem label="开始时间" value={formatDateTime(step.started_at)} />
-        <MetaItem label="耗时" value={formatDuration(step.duration_ms)} />
-        <MetaItem label="来源" value={sourceLabels.join("；") || "-"} />
+      <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-2 lg:grid-cols-4">
+        {metrics.map((item) => (
+          <MetaItem key={item.label} label={item.label} value={item.value} />
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-3 text-xs text-slate-500 sm:grid-cols-2">
+        <MetaItem label={text("开始时间", "Started")} value={formatDateTime(step.started_at)} />
+        <MetaItem label={text("来源", "Sources")} value={sourceLabels.join("；") || "-"} />
       </div>
 
       {summaryItems.length > 0 ? (
@@ -121,25 +153,31 @@ function AgentFlowStep({
 
       {fallbackUsed ? (
         <p className="mt-3 rounded-md border border-wheat/40 bg-wheat/10 px-3 py-2 text-sm leading-6 text-ink">
-          {FALLBACK_TEXT}
+          {text("该步骤使用本地样本数据保障演示稳定。", "This step used local sample data to keep the demo stable.")}
+        </p>
+      ) : null}
+
+      {slowStep ? (
+        <p className="mt-3 rounded-md border border-wheat/40 bg-wheat/10 px-3 py-2 text-sm font-medium leading-6 text-ink">
+          {text(SLOW_STEP_TEXT, "This step is taking longer than usual. The system is trying cache or sample-data fallback.")}
         </p>
       ) : null}
 
       {hasError ? (
         <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">
-          {step.error_message || "该步骤执行失败，请检查后端分析日志。"}
+          {step.error_message || text("该步骤执行失败，请检查后端分析日志。", "This step failed. Check backend analysis logs.")}
         </p>
       ) : null}
     </article>
   );
 }
 
-function StatusBadge({ status }: { status: AnalysisWorkflowStatus }) {
+function StatusBadge({ status, text }: { status: AnalysisWorkflowStatus; text: (zh: string, en?: string) => string }) {
   return (
     <span
       className={`inline-flex w-fit shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ${statusClassName(status)}`}
     >
-      {statusLabel(status)}
+      {statusLabel(status, text)}
     </span>
   );
 }
@@ -153,15 +191,16 @@ function MetaItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function statusLabel(status: AnalysisWorkflowStatus): string {
-  const labels: Record<AnalysisWorkflowStatus, string> = {
-    waiting: "等待中",
-    running: "运行中",
-    success: "已完成",
-    failed: "失败",
-    fallback_used: "使用兜底",
+function statusLabel(status: AnalysisWorkflowStatus, text: (zh: string, en?: string) => string): string {
+  const labels: Record<AnalysisWorkflowStatus, [string, string]> = {
+    waiting: ["等待中", "Waiting"],
+    running: ["运行中", "Running"],
+    success: ["已完成", "Completed"],
+    failed: ["失败", "Failed"],
+    fallback_used: ["使用兜底", "Fallback used"],
   };
-  return labels[status];
+  const [zh, en] = labels[status];
+  return text(zh, en);
 }
 
 function statusClassName(status: AnalysisWorkflowStatus): string {
@@ -248,6 +287,36 @@ function formatDuration(value: number | null): string {
     return `${value} ms`;
   }
   return `${(value / 1000).toFixed(1)} s`;
+}
+
+function formatMilliseconds(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  return `${value} ms`;
+}
+
+function countMetric(statusValue: number, performanceValue?: number): number {
+  return performanceValue ?? statusValue ?? 0;
+}
+
+function stepElapsedMs(
+  step: AnalysisStepLog,
+  performanceStep: AnalysisPerformanceStep | undefined,
+  now: number,
+): number | null {
+  const durationMs = performanceStep?.duration_ms ?? step.duration_ms;
+  if (durationMs !== null && durationMs !== undefined) {
+    return durationMs;
+  }
+  if (step.status !== "running" || !step.started_at) {
+    return null;
+  }
+  const startedAt = new Date(step.started_at).getTime();
+  if (!Number.isFinite(startedAt)) {
+    return null;
+  }
+  return Math.max(0, now - startedAt);
 }
 
 function formatDateTime(value: string | null): string {
