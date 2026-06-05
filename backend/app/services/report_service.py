@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Report
+from app.models import Report, ReportVersion
 from app.schemas import ReportCreate, ReportUpdate
 
 
@@ -33,6 +33,19 @@ def get_report(db: Session, report_id: int) -> Report | None:
 def create_report(db: Session, payload: ReportCreate) -> Report:
     report = Report(**payload.model_dump())
     db.add(report)
+    db.flush()
+    version = ReportVersion(
+        report_id=report.id,
+        version_number=1,
+        content_markdown=report.content_markdown,
+        content_html=report.content_html,
+        source_type="generated",
+        created_by="system",
+        version_note="Initial generated report version.",
+    )
+    db.add(version)
+    db.flush()
+    report.current_version_id = version.id
     db.commit()
     db.refresh(report)
     return report

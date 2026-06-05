@@ -51,6 +51,26 @@
 | Q15 | 接入现有分析流程 | P1 | not_started | Q13、Q14、R17-R21 | confirmed product 进入现有分析、看板、营销和报告流程。 |
 | Q16 | 测试、部署和演示材料更新 | P1 | not_started | Q11-Q15、Q06-Q08 | 后端/前端测试、环境变量说明、演示脚本、部署说明和合规风险话术。 |
 
+## 下一轮产品升级任务 Q40-Q54
+
+| 任务 | 名称 | 优先级 | 状态 | 依赖 | 并行关系 | 主要产出 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Q40 | 产品升级需求与架构重排 | P0 | done | Q39 | 总控文档任务 | 更新项目简介、架构、任务板，新增产品升级规格、插件借鉴评估、第三方 notice 和 Q40 状态记录。 |
+| Q41 | 多图商品录入后端规格与数据模型 | P0 | not_started | Q40 | 可与 Q43、Q44 并行 | 多图 Product Intake 数据模型、导入任务、图片资产、AI 契约和草稿确认后端方案；不借插件实现，只借 evidence ledger 思路。 |
+| Q42 | 多图商品录入前端体验 | P0 | not_started | Q41 | 依赖后端契约 | 多图上传、预览、排序、删除、草稿证据展示、低置信度提示和确认入库 UI；只借 Product Design 的 brief、截图证据、响应式和可访问性审查方法。 |
+| Q43 | 拍照新增企业后端与 `company_drafts` | P0 | not_started | Q40 | 可与 Q41、Q44 并行 | Company Intake 数据模型、企业图片导入、企业草稿、确认入正式企业和隐私过滤方案；不借 Sales/CRM enrichment。 |
+| Q44 | 后端目标国家与市场区域目录 | P0 | not_started | Q40 | 可与 Q41、Q43 并行 | Target Market Catalog、后端国家库、区域分组、启停状态、默认组合和 provider 映射；不借插件 connector/source registry。 |
+| Q45 | 分析流程接入动态市场目录 | P0 | not_started | Q44 | 依赖目录 API | 分析请求校验、国家/区域选择、provider 映射、fallback 兼容和报告国家名称来源统一；只借 Data Analytics 的来源验证、fallback 和 caveat 方法。 |
+| Q46 | 全局聊天后端编排与上下文权限 | P0 | not_started | Q40 | 可与 Q47 先做接口对齐 | Global Chat 会话、上下文解析、脱敏摘要、AI 调用、报告解析入口和安全错误响应；只借上下文路由思想，权限和脱敏本地实现。 |
+| Q47 | 全局聊天前端窗口 | P0 | not_started | Q46 | 依赖聊天 API | 跨页面聊天入口、上下文感知、消息流、错误态、报告 proposal 卡片和确认入口；只借 Product Design/Sales 的审阅确认体验，不借外部发送或 CRM 写入。 |
+| Q48 | 报告解析与引用定位 | P0 | not_started | Q46 | 可与 Q49 接口预研并行 | 报告章节解析、段落引用、指标定位、版本引用和聊天可解释回答结构；只借 Data Analytics/Financial Markets 的来源、caveat 和 source posture 方法。 |
+| Q49 | 报告修改 proposal 机制 | P0 | not_started | Q48 | 依赖报告解析 | `report_edit_proposals`、修改意图、建议 diff/替换段落、风险提示、状态流和预览 API；借 Sales 的草稿/审阅/确认流程，但 schema/API 本地定义。 |
+| Q50 | 报告版本管理与确认保存 | P0 | not_started | Q49 | 依赖 proposal | `report_versions`、当前版本指针、确认后新版本、版本列表、版本对比和原版本保留；不借插件 artifact packaging 或外部文档写入。 |
+| Q51 | 前端整体信息架构与视觉优化 | P1 | not_started | Q40 | 可与 Q41-Q50 并行，避免改接口 | 导航、工作区、移动端拍照录入、市场选择、报告编辑和空/错状态整体优化；只借 Product Design 的流程审查和设计 QA 方法。 |
+| Q52 | 端到端验收与安全回归 | P0 | not_started | Q42-Q50 | 汇总验证 | 多图商品、拍照企业、动态市场、全局聊天、报告 proposal 和版本链路测试记录；只借 QA checklist 思路，不借插件测试或 MCP validator。 |
+| Q53 | 演示数据、文案与比赛材料更新 | P1 | not_started | Q52 | 依赖功能验收 | Demo 数据、演示脚本、路演话术、风险说明和产品升级展示材料；只借报告/演示叙事结构，不借 CRM、投资、connector 或插件素材。 |
+| Q54 | 生产部署与升级验收记录 | P0 | not_started | Q52-Q53 | 最终收口 | 生产部署检查、线上验收、回滚说明、状态记录和最终交付清单；不借插件安装、connector 配置、workspace app binding 或 marketplace 发布流程。 |
+
 ## Q 阶段顺序
 
 1. Q01 先完成总控状态同步，消除任务板和实际状态漂移。
@@ -61,6 +81,13 @@
 6. Q10 是智能商品导入需求变更的总控设计任务，不创建迁移或运行时代码。
 7. Q11-Q13 在 Q10 后拆分推进后端截图、链接和草稿确认能力；Q14 在接口稳定后实现前端页面。
 8. Q15 把确认后的产品接入既有分析、营销和报告流程；Q16 汇总测试、部署和演示材料，并同步影响 Q07/Q08 的最终演示内容。
+9. Q40 是下一轮产品升级的总控文档任务，只更新需求、架构、规格、任务板和状态记录，不改业务代码。
+10. Q41、Q43、Q44 可在 Q40 后并行推进，分别处理多图商品、拍照企业和目标市场目录后端基础。
+11. Q42 依赖 Q41，Q45 依赖 Q44，Q46-Q48 建立全局聊天和报告解析基础。
+12. Q49-Q50 在报告解析后实现 proposal 和版本管理；聊天修改报告只生成 proposal，用户确认后才保存新版本。
+13. Q51 可与 Q41-Q50 并行做前端体验重排，但不得绕过后端目录、草稿确认和 proposal 确认规则。
+14. Q52-Q54 依次完成端到端验收、安全回归、演示材料更新和生产升级验收。
+15. Q40-Q54 参考 `openai/role-specific-plugins` 时只借方法，不复制插件实现、`.app.json`、connector app id、MCP 配置、assets、scripts、templates、品牌素材或 workspace 绑定；逐项评估见 `docs/ROLE_PLUGIN_ADAPTATION_PLAN.md`。
 
 ## 状态文件要求
 

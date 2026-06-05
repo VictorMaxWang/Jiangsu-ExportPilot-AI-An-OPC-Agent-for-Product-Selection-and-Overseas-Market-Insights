@@ -36,12 +36,26 @@ from app.schemas.ai import (
     ReportSectionRequest,
     ReportSectionResponse,
 )
+from app.schemas.chat import (
+    ChatMessageCreate,
+    ChatMessageRead,
+    ChatRole,
+    ChatSessionCreate,
+    ChatSessionRead,
+)
 from app.schemas.companies import (
     CompanyCreate,
     CompanyListItem,
     CompanyListResponse,
     CompanyRead,
     CompanyUpdate,
+)
+from app.schemas.company_intake import (
+    CompanyDraftRead,
+    CompanyDraftSummary,
+    CompanyDraftUpdateRequest,
+    CompanyImportAssetRead,
+    CompanyImportJobDetailResponse,
 )
 from app.schemas.credentials import (
     ApiCredentialCreate,
@@ -166,12 +180,16 @@ from app.schemas.provider_status import (
     ProviderTestStatus,
 )
 from app.schemas.reports import (
+    ReportEditProposalCreate,
+    ReportEditProposalRead,
     ReportCreate,
     ReportGenerateRequest,
     ReportListItem,
     ReportListResponse,
     ReportRead,
     ReportUpdate,
+    ReportVersionCreate,
+    ReportVersionRead,
 )
 from app.schemas.scoring import (
     CompetitorAnalysisResult,
@@ -181,8 +199,19 @@ from app.schemas.scoring import (
     ScoringRunRequest,
     ScoringRunResponse,
 )
+from app.schemas.target_markets import (
+    AnalysisCountryPresetCreate,
+    AnalysisCountryPresetRead,
+    AnalysisCountryPresetUpdate,
+    TargetCountryCreate,
+    TargetCountryRead,
+    TargetCountryUpdate,
+)
 
 __all__ = [
+    "AnalysisCountryPresetCreate",
+    "AnalysisCountryPresetRead",
+    "AnalysisCountryPresetUpdate",
     "AnalysisRunCreate",
     "AnalysisDetailResponse",
     "AnalysisPerformanceEvent",
@@ -212,7 +241,17 @@ __all__ = [
     "ApiCallLogItem",
     "ApiCallLogListResponse",
     "ApiCallStatus",
+    "ChatMessageCreate",
+    "ChatMessageRead",
+    "ChatRole",
+    "ChatSessionCreate",
+    "ChatSessionRead",
     "CompanyCreate",
+    "CompanyDraftRead",
+    "CompanyDraftSummary",
+    "CompanyDraftUpdateRequest",
+    "CompanyImportAssetRead",
+    "CompanyImportJobDetailResponse",
     "CompanyListItem",
     "CompanyListResponse",
     "CompanyRead",
@@ -315,6 +354,8 @@ __all__ = [
     "ProviderTestResponse",
     "ProviderTestStatus",
     "ReportCreate",
+    "ReportEditProposalCreate",
+    "ReportEditProposalRead",
     "ReportGenerateRequest",
     "ReportListItem",
     "ReportListResponse",
@@ -322,11 +363,16 @@ __all__ = [
     "ReportSectionRequest",
     "ReportSectionResponse",
     "ReportUpdate",
+    "ReportVersionCreate",
+    "ReportVersionRead",
     "ScoringResultsResponse",
     "ScoringRunRequest",
     "ScoringRunResponse",
     "ScoringSummary",
     "SuitableProductItem",
+    "TargetCountryCreate",
+    "TargetCountryRead",
+    "TargetCountryUpdate",
     "TradeStatCreate",
     "TradeStatListItem",
     "TradeStatRead",

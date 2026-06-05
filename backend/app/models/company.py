@@ -31,6 +31,10 @@ class Company(TimestampMixin, Base):
         back_populates="company",
         cascade="all, delete-orphan",
     )
+    confirmed_company_drafts: Mapped[list["CompanyDraft"]] = relationship(
+        "CompanyDraft",
+        back_populates="confirmed_company",
+    )
     analysis_runs: Mapped[list["AnalysisRun"]] = relationship(
         "AnalysisRun",
         back_populates="company",

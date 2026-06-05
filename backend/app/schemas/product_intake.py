@@ -120,6 +120,9 @@ class ProductImportAssetRead(BaseModel):
     file_size: int
     width: int | None = None
     height: int | None = None
+    image_index: int = 0
+    image_role: str = "unknown"
+    is_primary: bool = False
     created_at: datetime
 
 
@@ -148,6 +151,8 @@ class ProductDraftSummary(BaseModel):
     category: str | None = None
     price_cny: Decimal | None = None
     confidence_score: Decimal | None = None
+    image_count: int = 0
+    primary_image_asset_id: int | None = None
     confirmed_product_id: int | None = None
 
     @computed_field
@@ -171,6 +176,7 @@ class ProductDraftRead(ProductDraftSummary):
     target_users: list[str] | None = None
     source_platform: str | None = None
     evidence: list[dict[str, Any]] | None = None
+    multi_image_summary: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 

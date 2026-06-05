@@ -102,6 +102,9 @@ async def analyze_screenshot_upload(
         file_size=screenshot.file_size,
         width=screenshot.width,
         height=screenshot.height,
+        image_index=0,
+        image_role="screenshot",
+        is_primary=True,
     )
     db.add(job)
     db.add(asset)
@@ -361,6 +364,7 @@ def _create_draft_from_understanding(
         source_platform = source_platform_hint
 
     confidence = understanding.confidence_score
+    image_count, primary_image_asset_id = _image_context_for_job(job)
     draft = ProductDraft(
         import_job_id=job.id,
         company_id=job.company_id,
@@ -384,6 +388,9 @@ def _create_draft_from_understanding(
         source_platform=source_platform,
         evidence=_sanitize_evidence(understanding),
         confidence_score=confidence,
+        image_count=image_count,
+        primary_image_asset_id=primary_image_asset_id,
+        multi_image_summary=_multi_image_summary(image_count, primary_image_asset_id),
         status="draft",
     )
     job.source_platform = source_platform
@@ -416,11 +423,15 @@ def _create_fallback_draft(
     job.status = "draft_ready_with_low_confidence"
     job.error_code = code
     job.error_message = safe_message
+    image_count, primary_image_asset_id = _image_context_for_job(job)
     draft = ProductDraft(
         import_job_id=job.id,
         company_id=job.company_id,
         source_platform=job.source_platform,
         confidence_score=Decimal("0.0000"),
+        image_count=image_count,
+        primary_image_asset_id=primary_image_asset_id,
+        multi_image_summary=_multi_image_summary(image_count, primary_image_asset_id),
         status="draft",
         selling_points={
             "selling_points_cn": [],
@@ -438,6 +449,24 @@ def _create_fallback_draft(
     db.refresh(job)
     db.refresh(draft)
     return draft
+
+
+def _image_context_for_job(job: ProductImportJob) -> tuple[int, int | None]:
+    assets = sorted(job.assets, key=lambda asset: asset.image_index)
+    if not assets:
+        return 0, None
+    primary = next((asset for asset in assets if asset.is_primary), assets[0])
+    return len(assets), primary.id
+
+
+def _multi_image_summary(image_count: int, primary_image_asset_id: int | None) -> dict[str, object] | None:
+    if image_count <= 0:
+        return None
+    return {
+        "image_count": image_count,
+        "primary_image_asset_id": primary_image_asset_id,
+        "summary": "Single uploaded screenshot captured as the primary product image.",
+    }
 
 
 def _build_screenshot_response(

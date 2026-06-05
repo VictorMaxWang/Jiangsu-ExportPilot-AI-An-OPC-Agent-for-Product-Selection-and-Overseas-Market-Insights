@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, JSON, Numeric, String, Text
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CreatedAtMixin, TimestampMixin
@@ -46,6 +46,9 @@ class ProductImportJob(TimestampMixin, Base):
 
 class ProductImportAsset(CreatedAtMixin, Base):
     __tablename__ = "product_import_assets"
+    __table_args__ = (
+        CheckConstraint("image_index >= 0", name="image_index_nonnegative"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     import_job_id: Mapped[int] = mapped_column(
@@ -59,6 +62,9 @@ class ProductImportAsset(CreatedAtMixin, Base):
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    image_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    image_role: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown", index=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     import_job: Mapped[ProductImportJob] = relationship("ProductImportJob", back_populates="assets")
 
@@ -93,6 +99,7 @@ class ProductDraft(TimestampMixin, Base):
             "confidence_score IS NULL OR (confidence_score >= 0 AND confidence_score <= 1)",
             name="confidence_score_range",
         ),
+        CheckConstraint("image_count >= 0", name="image_count_nonnegative"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -122,6 +129,13 @@ class ProductDraft(TimestampMixin, Base):
     source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     evidence: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
     confidence_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    image_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    primary_image_asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_import_assets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    multi_image_summary: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", index=True)
     confirmed_product_id: Mapped[int | None] = mapped_column(
         ForeignKey("products.id", ondelete="SET NULL"),
@@ -132,3 +146,4 @@ class ProductDraft(TimestampMixin, Base):
     import_job: Mapped[ProductImportJob] = relationship("ProductImportJob", back_populates="drafts")
     company: Mapped["Company"] = relationship("Company", back_populates="product_drafts")
     confirmed_product: Mapped["Product | None"] = relationship("Product", back_populates="confirmed_drafts")
+    primary_image_asset: Mapped["ProductImportAsset | None"] = relationship("ProductImportAsset")
