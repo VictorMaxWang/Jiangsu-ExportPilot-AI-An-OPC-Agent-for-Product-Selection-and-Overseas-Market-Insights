@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.countries import GDELT_SOURCE_COUNTRIES, normalize_country_code
 from app.schemas import GdeltArticleItem, GdeltSearchResponse
 from app.services.analysis_performance import is_timeout_error, record_provider_http_call
 from app.services.providers import (
@@ -37,14 +38,7 @@ SUPPORTED_KEYWORDS: tuple[str, ...] = (
 
 _KEYWORD_BY_NORMALIZED = {keyword.lower(): keyword for keyword in SUPPORTED_KEYWORDS}
 
-SUPPORTED_COUNTRIES: dict[str, str] = {
-    "US": "unitedstates",
-    "GB": "unitedkingdom",
-    "JP": "japan",
-    "AU": "australia",
-    "SG": "singapore",
-    "CN": "china",
-}
+SUPPORTED_COUNTRIES: dict[str, str] = GDELT_SOURCE_COUNTRIES
 
 FALLBACK_KEYWORD_ALIASES: dict[str, tuple[str, ...]] = {
     "home textile": (
@@ -222,7 +216,7 @@ def _normalize_keyword(query: str) -> str:
 
 
 def _normalize_country(country: str) -> str:
-    normalized = country.strip().upper()
+    normalized = normalize_country_code(country)
     if normalized not in SUPPORTED_COUNTRIES:
         supported = ", ".join(SUPPORTED_COUNTRIES)
         raise DataProviderValidationError(f"Unsupported GDELT country: {country}. Supported: {supported}")

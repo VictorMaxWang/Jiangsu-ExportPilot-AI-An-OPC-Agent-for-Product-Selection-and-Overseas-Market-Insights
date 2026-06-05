@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from app.core.countries import COUNTRY_NAMES_EN, TARGET_COUNTRY_CODES, normalize_country_code
 from app.schemas import WorldBankCountryResponse, WorldBankIndicatorItem
 from app.services.analysis_performance import is_timeout_error, record_provider_http_call
 from app.services.providers import (
@@ -26,12 +27,8 @@ DEFAULT_BASE_URL = "https://api.worldbank.org/v2"
 FALLBACK_YEAR = 2025
 
 SUPPORTED_COUNTRIES: dict[str, str] = {
-    "US": "United States",
-    "GB": "United Kingdom",
-    "JP": "Japan",
-    "AU": "Australia",
-    "SG": "Singapore",
-    "CN": "China",
+    code: COUNTRY_NAMES_EN[code]
+    for code in (*TARGET_COUNTRY_CODES, "CN")
 }
 
 SUPPORTED_INDICATORS: dict[str, str] = {
@@ -162,7 +159,7 @@ class WorldBankProvider:
 
 
 def _normalize_country(country_code: str) -> str:
-    normalized = country_code.strip().upper()
+    normalized = normalize_country_code(country_code)
     if normalized not in SUPPORTED_COUNTRIES:
         supported = ", ".join(SUPPORTED_COUNTRIES)
         raise DataProviderValidationError(f"Unsupported World Bank country_code: {country_code}. Supported: {supported}")

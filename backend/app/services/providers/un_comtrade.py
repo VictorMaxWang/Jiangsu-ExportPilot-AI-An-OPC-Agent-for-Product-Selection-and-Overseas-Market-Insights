@@ -12,6 +12,7 @@ from typing import Any, Literal
 import httpx
 
 from app.core.config import Settings, get_settings
+from app.core.countries import COUNTRY_ALIASES, ISO2_TO_ISO3, UN_COMTRADE_COUNTRY_CODES
 from app.schemas import UnComtradeTradeFlowResponse, UnComtradeTradeRecord
 from app.services.analysis_performance import is_timeout_error, record_provider_http_call
 from app.services.providers import (
@@ -48,27 +49,9 @@ class UnComtradeSeedQuery:
 
 
 _COUNTRY_ALIASES: dict[str, _Country] = {
-    "CHN": _Country("CHN", "156"),
-    "CN": _Country("CHN", "156"),
-    "CHINA": _Country("CHN", "156"),
-    "PEOPLES REPUBLIC OF CHINA": _Country("CHN", "156"),
-    "USA": _Country("USA", "842"),
-    "US": _Country("USA", "842"),
-    "UNITED STATES": _Country("USA", "842"),
-    "UNITED STATES OF AMERICA": _Country("USA", "842"),
-    "GBR": _Country("GBR", "826"),
-    "GB": _Country("GBR", "826"),
-    "UK": _Country("GBR", "826"),
-    "UNITED KINGDOM": _Country("GBR", "826"),
-    "JPN": _Country("JPN", "392"),
-    "JP": _Country("JPN", "392"),
-    "JAPAN": _Country("JPN", "392"),
-    "AUS": _Country("AUS", "36"),
-    "AU": _Country("AUS", "36"),
-    "AUSTRALIA": _Country("AUS", "36"),
-    "SGP": _Country("SGP", "702"),
-    "SG": _Country("SGP", "702"),
-    "SINGAPORE": _Country("SGP", "702"),
+    alias: _Country(ISO2_TO_ISO3[iso2], UN_COMTRADE_COUNTRY_CODES[iso2])
+    for alias, iso2 in COUNTRY_ALIASES.items()
+    if iso2 in ISO2_TO_ISO3 and iso2 in UN_COMTRADE_COUNTRY_CODES
 }
 
 _FLOW_ALIASES: dict[str, Literal["export", "import"]] = {

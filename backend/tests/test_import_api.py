@@ -12,7 +12,7 @@ from app import models as _models
 from app.db import get_db
 from app.db.base import Base
 from app.main import app
-from app.models import CompetitorItem, ProductKeyword
+from app.models import AnalysisCountryPreset, CompetitorItem, ProductKeyword, TargetCountry
 from app.services.importers import csv_importer
 
 _ = _models
@@ -20,6 +20,33 @@ _ = _models
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SEED_DIR = PROJECT_ROOT / "data" / "seed"
 DEMO_COUNTRIES = {"US", "GB", "JP", "AU", "SG"}
+CATALOG_COUNTRIES = {
+    "JP",
+    "KR",
+    "SG",
+    "MY",
+    "AE",
+    "GB",
+    "DE",
+    "FR",
+    "NL",
+    "IT",
+    "US",
+    "CA",
+    "MX",
+    "BR",
+    "CL",
+    "AU",
+    "NZ",
+    "ZA",
+    "EG",
+}
+COUNTRY_PRESETS = {
+    "FIVE_CONTINENT_REPS": ["JP", "DE", "US", "AU", "ZA"],
+    "MATURE_WESTERN_MARKETS": ["US", "CA", "GB", "DE", "FR", "NL", "IT"],
+    "EAST_AND_SEA": ["JP", "KR", "SG", "MY"],
+    "BELT_ROAD_POTENTIAL": ["MY", "AE", "EG", "ZA"],
+}
 COMPETITOR_PLATFORMS = {
     "Etsy Sample",
     "Amazon Sample",
@@ -128,7 +155,7 @@ def test_seed_csv_files_exist_with_required_headers_and_rows() -> None:
             },
         },
         "market_profiles.csv": {
-            "min_rows": 5,
+            "min_rows": 19,
             "headers": {
                 "country_code",
                 "country_name",
@@ -139,6 +166,42 @@ def test_seed_csv_files_exist_with_required_headers_and_rows() -> None:
                 "competition_level",
                 "logistics_difficulty",
                 "notes",
+            },
+        },
+        "target_countries.csv": {
+            "exact_rows": 19,
+            "headers": {
+                "country_code",
+                "name_cn",
+                "name_en",
+                "region_code",
+                "region_name_cn",
+                "region_name_en",
+                "continent",
+                "currency_code",
+                "languages",
+                "default_sort_order",
+                "enabled",
+                "analysis_enabled",
+                "disabled_reason",
+                "provider_mappings",
+                "fallback_enabled",
+                "notes",
+            },
+        },
+        "analysis_country_presets.csv": {
+            "exact_rows": 4,
+            "headers": {
+                "preset_code",
+                "name_cn",
+                "name_en",
+                "description",
+                "country_codes",
+                "industry_tags",
+                "region_code",
+                "is_default",
+                "sort_order",
+                "enabled",
             },
         },
         "trade_samples.csv": {
@@ -256,7 +319,20 @@ def test_seed_csv_files_exist_with_required_headers_and_rows() -> None:
 
     with (SEED_DIR / "market_profiles.csv").open("r", encoding="utf-8-sig", newline="") as csv_file:
         profiles = list(csv.DictReader(csv_file))
-    assert DEMO_COUNTRIES == {row["country_code"] for row in profiles}
+    assert CATALOG_COUNTRIES == {row["country_code"] for row in profiles}
+
+    with (SEED_DIR / "target_countries.csv").open("r", encoding="utf-8-sig", newline="") as csv_file:
+        countries = list(csv.DictReader(csv_file))
+    assert CATALOG_COUNTRIES == {row["country_code"] for row in countries}
+    assert all(row["enabled"] == "true" and row["analysis_enabled"] == "true" for row in countries)
+    assert all(row["provider_mappings"].startswith("{") for row in countries)
+
+    with (SEED_DIR / "analysis_country_presets.csv").open("r", encoding="utf-8-sig", newline="") as csv_file:
+        presets = list(csv.DictReader(csv_file))
+    assert COUNTRY_PRESETS == {
+        row["preset_code"]: [code for code in row["country_codes"].split(";") if code]
+        for row in presets
+    }
 
 
 def test_product_import_requires_company_id(client_with_session: tuple[TestClient, sessionmaker[Session]]) -> None:
@@ -375,7 +451,9 @@ def test_seed_import_endpoints_insert_market_demo_data(
     client, _session_factory = client_with_session
     expectations = {
         "/api/import/competitors": 300,
-        "/api/import/market-profiles": 30,
+        "/api/import/market-profiles": 114,
+        "/api/import/target-countries": 19,
+        "/api/import/analysis-country-presets": 4,
         "/api/import/trade-samples": 100,
         "/api/import/content-trends": 250,
         "/api/import/user-discussions": 100,
@@ -388,6 +466,10 @@ def test_seed_import_endpoints_insert_market_demo_data(
         assert payload["inserted"] == inserted
         assert payload["failed"] == 0
         assert payload["source"] == "csv_fallback"
+
+    with _session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(TargetCountry)) == 19
+        assert db.scalar(select(func.count()).select_from(AnalysisCountryPreset)) == 4
 
 
 def test_validate_mode_does_not_write_rows(

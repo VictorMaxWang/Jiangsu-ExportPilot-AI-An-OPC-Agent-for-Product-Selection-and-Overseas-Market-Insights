@@ -90,14 +90,15 @@ def test_worldbank_sync_endpoint_is_idempotent(
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
-    assert first_response.json()["inserted"] == 6
+    assert first_response.json()["requested"] == 20
+    assert first_response.json()["inserted"] == 20
     assert first_response.json()["updated"] == 0
     assert second_response.json()["inserted"] == 0
-    assert second_response.json()["updated"] == 6
+    assert second_response.json()["updated"] == 20
     with session_factory() as db:
         count = db.scalar(select(func.count()).select_from(MarketIndicator))
         sources = set(db.scalars(select(MarketIndicator.source)))
-    assert count == 6
+    assert count == 20
     assert sources == {"worldbank_api"}
 
 

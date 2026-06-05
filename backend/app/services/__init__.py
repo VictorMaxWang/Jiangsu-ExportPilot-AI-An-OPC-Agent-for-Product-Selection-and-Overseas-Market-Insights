@@ -16,6 +16,7 @@ from app.services import (
     report_service,
     reports,
     scoring,
+    target_market_catalog,
     youtube_cache_service,
 )
 
@@ -35,5 +36,6 @@ __all__ = [
     "report_service",
     "reports",
     "scoring",
+    "target_market_catalog",
     "youtube_cache_service",
 ]

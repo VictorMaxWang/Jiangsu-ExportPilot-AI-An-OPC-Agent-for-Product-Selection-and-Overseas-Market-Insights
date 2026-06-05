@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.countries import normalize_country_codes
+
 
 class AnalysisRunBase(BaseModel):
     company_id: int
@@ -72,18 +74,7 @@ class AnalysisRunRequest(BaseModel):
     @field_validator("target_countries")
     @classmethod
     def _clean_target_countries(cls, values: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            normalized = value.strip().upper()
-            if len(normalized) not in {2, 3} or not normalized.isalpha():
-                raise ValueError("target_countries must contain two- or three-letter country codes")
-            if normalized not in seen:
-                cleaned.append(normalized)
-                seen.add(normalized)
-        if not cleaned:
-            raise ValueError("At least one target country is required")
-        return cleaned
+        return normalize_country_codes(values, field_name="target_countries")
 
 
 class AnalysisStepLog(BaseModel):

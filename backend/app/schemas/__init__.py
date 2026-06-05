@@ -201,9 +201,13 @@ from app.schemas.scoring import (
     ScoringRunResponse,
 )
 from app.schemas.target_markets import (
+    AnalysisCountryPresetCatalogItem,
+    AnalysisCountryPresetCatalogResponse,
     AnalysisCountryPresetCreate,
     AnalysisCountryPresetRead,
     AnalysisCountryPresetUpdate,
+    TargetCountryCatalogItem,
+    TargetCountryCatalogResponse,
     TargetCountryCreate,
     TargetCountryRead,
     TargetCountryUpdate,
@@ -211,6 +215,8 @@ from app.schemas.target_markets import (
 
 __all__ = [
     "AnalysisCountryPresetCreate",
+    "AnalysisCountryPresetCatalogItem",
+    "AnalysisCountryPresetCatalogResponse",
     "AnalysisCountryPresetRead",
     "AnalysisCountryPresetUpdate",
     "AnalysisRunCreate",
@@ -373,6 +379,8 @@ __all__ = [
     "ScoringSummary",
     "SuitableProductItem",
     "TargetCountryCreate",
+    "TargetCountryCatalogItem",
+    "TargetCountryCatalogResponse",
     "TargetCountryRead",
     "TargetCountryUpdate",
     "TradeStatCreate",

@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.countries import DEFAULT_TARGET_COUNTRIES, normalize_country_codes
 from app.schemas.market_content_analysis import AnalysisSource
 
 
@@ -66,7 +67,7 @@ class ScoringRunRequest(BaseModel):
 
     company_id: int = Field(ge=1)
     product_ids: list[int] | None = None
-    target_countries: list[str] = Field(default_factory=lambda: ["US", "GB", "JP", "AU", "SG"])
+    target_countries: list[str] = Field(default_factory=lambda: list(DEFAULT_TARGET_COUNTRIES))
     competitor_limit: int = Field(default=20, ge=1, le=50)
 
     @field_validator("product_ids")
@@ -87,18 +88,7 @@ class ScoringRunRequest(BaseModel):
     @field_validator("target_countries")
     @classmethod
     def _clean_target_countries(cls, values: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            normalized = value.strip().upper()
-            if len(normalized) not in {2, 3} or not normalized.isalpha():
-                raise ValueError("target_countries must contain two- or three-letter country codes")
-            if normalized not in seen:
-                cleaned.append(normalized)
-                seen.add(normalized)
-        if not cleaned:
-            raise ValueError("At least one target country is required")
-        return cleaned
+        return normalize_country_codes(values, field_name="target_countries")
 
 
 class ScoringRunResponse(BaseModel):

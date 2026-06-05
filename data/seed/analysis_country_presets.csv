@@ -1,0 +1,5 @@
+preset_code,name_cn,name_en,description,country_codes,industry_tags,region_code,is_default,sort_order,enabled
+FIVE_CONTINENT_REPS,五大洲代表市场,Five Continent Representative Markets,覆盖亚洲欧洲北美大洋洲和非洲的快速对比组合,JP;DE;US;AU;ZA,home_textile;consumer_goods,GLOBAL,true,1,true
+MATURE_WESTERN_MARKETS,欧美成熟市场,Mature Western Markets,覆盖北美和西欧成熟电商市场,US;CA;GB;DE;FR;NL;IT,home_textile;premium_goods,EUROPE_NORTH_AMERICA,false,2,true
+EAST_AND_SEA,东亚和东南亚,East Asia and Southeast Asia,覆盖东亚成熟市场和东南亚增长市场,JP;KR;SG;MY,home_textile;digital_commerce,ASIA,false,3,true
+BELT_ROAD_POTENTIAL,一带一路潜力市场,Belt and Road Potential Markets,覆盖东南亚中东和非洲代表市场,MY;AE;EG;ZA,home_textile;belt_road,GLOBAL,false,4,true

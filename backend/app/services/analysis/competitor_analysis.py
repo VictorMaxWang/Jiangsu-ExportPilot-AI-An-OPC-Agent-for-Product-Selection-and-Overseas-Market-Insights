@@ -6,16 +6,9 @@ from decimal import Decimal, ROUND_HALF_UP
 from statistics import median
 from typing import Protocol
 
+from app.core.countries import COUNTRY_CURRENCY
 from app.schemas import CompetitorAnalysisResult
 
-
-COUNTRY_CURRENCY = {
-    "US": "USD",
-    "GB": "GBP",
-    "JP": "JPY",
-    "AU": "AUD",
-    "SG": "SGD",
-}
 
 STOP_TERMS = {
     "and",
@@ -42,6 +35,20 @@ STOP_TERMS = {
     "jp",
     "au",
     "sg",
+    "kr",
+    "my",
+    "ae",
+    "de",
+    "fr",
+    "nl",
+    "it",
+    "ca",
+    "mx",
+    "br",
+    "cl",
+    "nz",
+    "za",
+    "eg",
     "usa",
     "uk",
 }

@@ -12,6 +12,12 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.countries import (
+    CNY_TO_TARGET_CURRENCY,
+    COUNTRY_CURRENCY,
+    COUNTRY_LOGISTICS_BASE,
+    DEFAULT_TARGET_COUNTRIES,
+)
 from app.models import AnalysisRun, Company, OpportunityScore, Product, ProductDraft, ProductKeyword
 from app.schemas import (
     AnalysisSource,
@@ -34,11 +40,12 @@ from app.services.analysis import analyze_competitors
 from app.services.analysis_performance import mark_latest_qwen_fallback
 from app.services.data_sources import DataSourceService
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
+from app.services.target_market_catalog import TargetMarketCatalogError, TargetMarketCatalogService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_SEED_DIR = PROJECT_ROOT / "data" / "seed"
-TARGET_COUNTRIES = ("US", "GB", "JP", "AU", "SG")
+TARGET_COUNTRIES = DEFAULT_TARGET_COUNTRIES
 DEFAULT_SCORING_QWEN_TIMEOUT_SECONDS = 20.0
 
 WEIGHTS = {
@@ -49,31 +56,6 @@ WEIGHTS = {
     "logistics_score": Decimal("0.10"),
     "content_score": Decimal("0.05"),
 }
-
-CNY_TO_TARGET_CURRENCY = {
-    "USD": Decimal("0.14"),
-    "GBP": Decimal("0.11"),
-    "JPY": Decimal("22.00"),
-    "AUD": Decimal("0.21"),
-    "SGD": Decimal("0.19"),
-}
-
-COUNTRY_CURRENCY = {
-    "US": "USD",
-    "GB": "GBP",
-    "JP": "JPY",
-    "AU": "AUD",
-    "SG": "SGD",
-}
-
-COUNTRY_LOGISTICS_BASE = {
-    "US": 70,
-    "GB": 70,
-    "JP": 90,
-    "AU": 70,
-    "SG": 90,
-}
-
 
 class OpportunityScoringService:
     def __init__(
@@ -87,9 +69,11 @@ class OpportunityScoringService:
         self._db = db
         self._data_sources = data_source_service
         self._ai_client = ai_client or BailianClient()
+        self._catalog_service = TargetMarketCatalogService(db)
         self._seed_dir = seed_dir or DEFAULT_SEED_DIR
 
     async def run(self, request: ScoringRunRequest) -> ScoringRunResponse:
+        request.target_countries = self._validated_countries(request.target_countries)
         company = self._db.get(Company, request.company_id)
         if company is None:
             raise ValueError("Company not found")
@@ -121,6 +105,7 @@ class OpportunityScoringService:
         raw_signals: dict[str, dict[str, Any]] | None = None,
         use_ai_explanations: bool = False,
     ) -> ScoringRunResponse:
+        request.target_countries = self._validated_countries(request.target_countries)
         company = self._db.get(Company, request.company_id)
         if company is None:
             raise ValueError("Company not found")
@@ -180,6 +165,12 @@ class OpportunityScoringService:
                 analysis_run.error_message = "Scoring run failed."
                 self._db.commit()
             raise exc
+
+    def _validated_countries(self, country_codes: list[str]) -> list[str]:
+        try:
+            return self._catalog_service.validate_analysis_countries(country_codes)
+        except TargetMarketCatalogError as exc:
+            raise ValueError(str(exc)) from exc
 
     def results(self, analysis_id: int) -> ScoringResultsResponse | None:
         analysis_run = self._db.get(AnalysisRun, analysis_id)

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.countries import normalize_country_code
+
+
+CatalogSource = Literal["database", "csv_fallback"]
+
 
 def _normalize_country_code(value: object) -> str:
-    code = str(value or "").strip().upper()
-    if len(code) not in {2, 3} or not code.isalpha():
-        raise ValueError("country code must be a two- or three-letter ISO code")
-    return code
+    return normalize_country_code(value)
 
 
 class TargetCountryBase(BaseModel):
@@ -105,6 +107,21 @@ class TargetCountryRead(TargetCountryBase):
     updated_at: datetime
 
 
+class TargetCountryCatalogItem(TargetCountryBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    source: CatalogSource = "database"
+
+
+class TargetCountryCatalogResponse(BaseModel):
+    items: list[TargetCountryCatalogItem]
+    total: int
+    source: CatalogSource
+
+
 class AnalysisCountryPresetBase(BaseModel):
     preset_code: str = Field(min_length=1, max_length=64)
     name_cn: str = Field(min_length=1, max_length=128)
@@ -173,3 +190,18 @@ class AnalysisCountryPresetRead(AnalysisCountryPresetBase):
     id: int
     created_at: datetime
     updated_at: datetime
+
+
+class AnalysisCountryPresetCatalogItem(AnalysisCountryPresetBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    source: CatalogSource = "database"
+
+
+class AnalysisCountryPresetCatalogResponse(BaseModel):
+    items: list[AnalysisCountryPresetCatalogItem]
+    total: int
+    source: CatalogSource

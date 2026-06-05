@@ -25,6 +25,28 @@ from app.services.data_sources import DataSourceService
 
 
 TARGET_COUNTRIES = ("US", "GB", "JP", "AU", "SG")
+PROFILE_COUNTRIES = ("US", "GB", "JP", "AU", "SG", "DE", "BR", "ZA")
+CATALOG_COUNTRIES = (
+    "JP",
+    "KR",
+    "SG",
+    "MY",
+    "AE",
+    "GB",
+    "DE",
+    "FR",
+    "NL",
+    "IT",
+    "US",
+    "CA",
+    "MX",
+    "BR",
+    "CL",
+    "AU",
+    "NZ",
+    "ZA",
+    "EG",
+)
 
 
 @pytest.fixture()
@@ -48,7 +70,7 @@ def db_session() -> Generator[Session, None, None]:
         Base.metadata.drop_all(bind=engine)
 
 
-@pytest.mark.parametrize("country_code", TARGET_COUNTRIES)
+@pytest.mark.parametrize("country_code", PROFILE_COUNTRIES)
 def test_target_country_profiles_fallback_to_seed_data(country_code: str, db_session: Session) -> None:
     service = _analysis_service(db_session)
 
@@ -66,6 +88,8 @@ def test_target_country_profiles_fallback_to_seed_data(country_code: str, db_ses
     assert result.fallback_used is True
     assert result.suitable_products
     assert result.summary
+    assert result.evidence["data_quality"]["fallback_available"] is True
+    assert result.evidence["data_quality"]["confidence_level"] in {"medium", "low"}
     for score in (
         result.market_size_score,
         result.consumption_power_score,
@@ -87,6 +111,34 @@ def test_compare_defaults_to_five_target_countries_and_sorts(db_session: Session
     assert {item.country_code for item in result.items} == set(TARGET_COUNTRIES)
     sort_scores = [_sort_score(item) for item in result.items]
     assert sort_scores == sorted(sort_scores, reverse=True)
+
+
+def test_compare_many_countries_uses_deterministic_summaries_without_qwen(db_session: Session) -> None:
+    service = MarketProfileAnalysisService(
+        DataSourceService(
+            db_session,
+            worldbank_provider=FailingWorldBankProvider(),
+            un_comtrade_provider=FailingUnComtradeProvider(),
+        ),
+        ai_client=UnexpectedAiClient(),
+    )
+
+    result = asyncio.run(
+        service.compare_markets(
+            "home textile",
+            country_codes=list(CATALOG_COUNTRIES),
+            keyword="home decor",
+            hs_code="6302",
+        )
+    )
+
+    assert len(result.items) == len(CATALOG_COUNTRIES)
+    assert {item.country_code for item in result.items} == set(CATALOG_COUNTRIES)
+    assert result.ai_fallback_used is False
+    assert any(
+        source.provider == "backend" and source.source_type == "local"
+        for source in result.sources
+    )
 
 
 def test_preloaded_market_signal_skips_provider_refetch_and_qwen(db_session: Session) -> None:

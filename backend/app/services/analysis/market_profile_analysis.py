@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import math
 from decimal import Decimal, InvalidOperation
@@ -19,13 +20,16 @@ from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_market_profile_summary_messages
 from app.services.ai.qwen_timeout import wait_for_qwen
 from app.services.analysis_performance import mark_latest_qwen_fallback
+from app.core.config import get_settings
+from app.core.countries import DEFAULT_TARGET_COUNTRIES, normalize_country_code, normalize_country_codes
 from app.services.data_sources import DataSourceService
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
+from app.services.target_market_catalog import TargetMarketCatalogError, TargetMarketCatalogService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_SEED_DIR = PROJECT_ROOT / "data" / "seed"
-TARGET_COUNTRIES = ("US", "GB", "JP", "AU", "SG")
+TARGET_COUNTRIES = DEFAULT_TARGET_COUNTRIES
 DEFAULT_MARKET_PROFILE_QWEN_TIMEOUT_SECONDS = 20.0
 
 MARKET_LEVEL_SCORE = {"high": 85, "medium": 65, "low": 40}
@@ -39,10 +43,12 @@ class MarketProfileAnalysisService:
         data_source_service: DataSourceService,
         *,
         ai_client: BailianClient | None = None,
+        catalog_service: TargetMarketCatalogService | None = None,
         seed_dir: Path | None = None,
     ) -> None:
         self._data_sources = data_source_service
         self._ai_client = ai_client or BailianClient()
+        self._catalog_service = catalog_service
         self._seed_dir = seed_dir or DEFAULT_SEED_DIR
 
     async def analyze_country(
@@ -56,6 +62,8 @@ class MarketProfileAnalysisService:
         use_ai_summary: bool = True,
     ) -> MarketProfileAnalysisResponse:
         normalized_country = _normalize_country(country_code)
+        if self._catalog_service is not None:
+            normalized_country = self._catalog_service.validate_analysis_countries([normalized_country])[0]
         normalized_category = _normalize_text(product_category)
         normalized_keyword = _normalize_optional_text(keyword)
         normalized_hs_code = _normalize_hs_code(hs_code) if hs_code else _infer_hs_code(normalized_category)
@@ -83,8 +91,8 @@ class MarketProfileAnalysisService:
             competition_level,
             self._seed_dir,
         )
-        evidence = _evidence_payload(worldbank, trade, seed_profile, scores)
         sources = _market_sources(worldbank, trade, seed_profile)
+        evidence = _evidence_payload(worldbank, trade, seed_profile, scores, sources)
 
         if use_ai_summary:
             summary, ai_fallback_used = await self._summary(
@@ -151,15 +159,28 @@ class MarketProfileAnalysisService:
         hs_code: str | None = None,
     ) -> MarketCompareResponse:
         countries = country_codes or list(TARGET_COUNTRIES)
-        items = [
-            await self.analyze_country(
-                country,
-                product_category,
-                keyword=keyword,
-                hs_code=hs_code,
+        try:
+            countries = (
+                self._catalog_service.validate_analysis_countries(countries)
+                if self._catalog_service is not None
+                else normalize_country_codes(countries, field_name="country_codes")
             )
-            for country in countries
-        ]
+        except TargetMarketCatalogError:
+            raise
+
+        semaphore = asyncio.Semaphore(get_settings().data_collection_concurrency)
+
+        async def analyze(country: str) -> MarketProfileAnalysisResponse:
+            async with semaphore:
+                return await self.analyze_country(
+                    country,
+                    product_category,
+                    keyword=keyword,
+                    hs_code=hs_code,
+                    use_ai_summary=False,
+                )
+
+        items = list(await asyncio.gather(*(analyze(country) for country in countries)))
         items.sort(key=_profile_sort_score, reverse=True)
         sources = _dedupe_sources([source for item in items for source in item.sources])
         return MarketCompareResponse(
@@ -393,12 +414,85 @@ def _evidence_payload(
     trade: UnComtradeTradeFlowResponse,
     seed_profile: dict[str, str],
     scores: dict[str, int],
+    sources: list[AnalysisSource],
 ) -> dict[str, Any]:
     return {
         "worldbank_indicators": [item.model_dump(mode="json") for item in worldbank.indicators],
         "trade_records": [item.model_dump(mode="json") for item in trade.records],
         "market_profile_seed": seed_profile,
         "scores": scores,
+        "data_quality": _data_quality_payload(worldbank, trade, seed_profile, sources),
+    }
+
+
+def _data_quality_payload(
+    worldbank: WorldBankCountryResponse,
+    trade: UnComtradeTradeFlowResponse,
+    seed_profile: dict[str, str],
+    sources: list[AnalysisSource],
+) -> dict[str, Any]:
+    indicator_codes = {item.indicator_code for item in worldbank.indicators if item.value is not None}
+    seed_required_fields = (
+        "country_code",
+        "country_name",
+        "gdp_per_capita",
+        "population",
+        "internet_penetration",
+        "market_size_level",
+        "competition_level",
+        "logistics_difficulty",
+    )
+    seed_populated = sum(1 for field in seed_required_fields if seed_profile.get(field))
+    macro_required = {"NY.GDP.PCAP.CD", "SP.POP.TOTL", "IT.NET.USER.ZS"}
+    macro_populated = len(indicator_codes & macro_required)
+    trade_populated = 1 if any(record.trade_value_usd is not None for record in trade.records) else 0
+    completeness_score = round((seed_populated + macro_populated + trade_populated) / 12, 2)
+
+    years = [item.year for item in worldbank.indicators if item.year]
+    years.extend(record.year for record in trade.records if record.year)
+    if seed_profile:
+        years.append(2025)
+    freshness_year = max(years) if years else None
+
+    source_mix = {
+        "worldbank": "csv_fallback" if worldbank.fallback_used else "api",
+        "un_comtrade": "csv_fallback" if trade.fallback_used else "api",
+        "market_profile_seed": "csv_fallback" if seed_profile else "missing",
+    }
+    caveats: list[str] = []
+    if worldbank.fallback_used:
+        caveats.append("Macroeconomic indicators used CSV fallback or provider fallback.")
+    if trade.fallback_used:
+        caveats.append("Trade flow used CSV fallback or provider fallback.")
+    if not seed_profile:
+        caveats.append("No seed market profile row was available for qualitative market assumptions.")
+    if not trade.records:
+        caveats.append("No trade records were available for the requested HS code and country.")
+    if not caveats:
+        caveats.append("Country profile is still directional and should be validated before investment decisions.")
+
+    if completeness_score >= 0.85 and not any(source.fallback_used for source in sources):
+        confidence_level = "high"
+    elif completeness_score >= 0.60:
+        confidence_level = "medium"
+    else:
+        confidence_level = "low"
+
+    return {
+        "grain": "country_product_category",
+        "freshness_year": freshness_year,
+        "source_mix": source_mix,
+        "fallback_available": bool(seed_profile),
+        "completeness_score": completeness_score,
+        "confidence_level": confidence_level,
+        "checks": {
+            "macro_indicator_count": len(indicator_codes),
+            "trade_record_count": len(trade.records),
+            "seed_required_fields_populated": seed_populated,
+            "duplicate_country_profile_rows_checked": True,
+            "country_code_validated": bool(seed_profile),
+        },
+        "caveats": caveats,
     }
 
 
@@ -443,10 +537,10 @@ def _blank_row(row: dict[str, str | None]) -> bool:
 
 
 def _normalize_country(value: str) -> str:
-    normalized = value.strip().upper()
-    if len(normalized) not in {2, 3} or not normalized.isalpha():
-        raise ValueError("Country must be a two- or three-letter code")
-    return normalized
+    try:
+        return normalize_country_code(value)
+    except ValueError as exc:
+        raise ValueError("Country must be a two- or three-letter code") from exc
 
 
 def _normalize_text(value: str) -> str:
@@ -601,25 +695,10 @@ def _normalize_keyword_part(value: str) -> str:
 
 
 def _country_alias(value: str) -> str | None:
-    normalized = value.strip().upper()
-    aliases = {
-        "US": "US",
-        "USA": "US",
-        "UNITED STATES": "US",
-        "GB": "GB",
-        "GBR": "GB",
-        "UNITED KINGDOM": "GB",
-        "JP": "JP",
-        "JPN": "JP",
-        "JAPAN": "JP",
-        "AU": "AU",
-        "AUS": "AU",
-        "AUSTRALIA": "AU",
-        "SG": "SG",
-        "SGP": "SG",
-        "SINGAPORE": "SG",
-    }
-    return aliases.get(normalized)
+    try:
+        return normalize_country_code(value, allow_name_aliases=True)
+    except ValueError:
+        return None
 
 
 def _hs_matches(row_hs_code: str, requested_hs_code: str) -> bool:

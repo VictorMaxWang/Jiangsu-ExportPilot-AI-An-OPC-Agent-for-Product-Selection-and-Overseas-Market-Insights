@@ -68,6 +68,7 @@ from app.services.data_sources import DataSourceService
 from app.services.providers import API_SOURCE, CSV_FALLBACK_SOURCE
 from app.services.reports import ReportGenerationInputError, ReportGenerator
 from app.services.scoring import OpportunityScoringService
+from app.services.target_market_catalog import TargetMarketCatalogError, TargetMarketCatalogService
 from app.utils.redaction import redact_text
 
 
@@ -139,6 +140,7 @@ class ExportInsightWorkflow:
         self._db = db
         self._data_sources = data_source_service
         self._ai_client = ai_client or BailianClient()
+        self._catalog_service = TargetMarketCatalogService(db)
         self._agents = [
             CompanyProfilingAgent(),
             ProductUnderstandingAgent(),
@@ -155,6 +157,11 @@ class ExportInsightWorkflow:
         company = self._db.get(Company, request.company_id)
         if company is None:
             raise WorkflowInputError("Company not found", code="COMPANY_NOT_FOUND")
+
+        try:
+            request.target_countries = self._catalog_service.validate_analysis_countries(request.target_countries)
+        except TargetMarketCatalogError as exc:
+            raise WorkflowInputError(str(exc)) from exc
 
         products = _products_for_request(self._db, request)
         if not products:

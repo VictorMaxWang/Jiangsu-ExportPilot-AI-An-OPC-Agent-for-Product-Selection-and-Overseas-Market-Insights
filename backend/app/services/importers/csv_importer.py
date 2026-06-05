@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -11,15 +12,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AnalysisCountryPreset,
     Company,
     CompetitorItem,
     ContentTrend,
     MarketIndicator,
     Product,
     ProductKeyword,
+    TargetCountry,
     TradeStat,
 )
 from app.schemas.imports import CsvImportErrorDetail, CsvImportResult, ImportMode
+from app.schemas.target_markets import AnalysisCountryPresetCreate, TargetCountryCreate
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -260,6 +264,132 @@ def import_market_profiles(
         )
 
     return _insert_objects(db, loaded.result, indicators, mode)
+
+
+def import_target_countries(
+    db: Session,
+    *,
+    file_name: str | None = None,
+    mode: ImportMode = "insert",
+    seed_dir: Path | None = None,
+) -> CsvImportResult:
+    loaded = _load_csv(
+        "target-countries",
+        "target_countries.csv",
+        mode,
+        required_headers={
+            "country_code",
+            "name_cn",
+            "name_en",
+            "region_code",
+            "region_name_cn",
+            "region_name_en",
+            "continent",
+            "currency_code",
+            "languages",
+            "default_sort_order",
+            "enabled",
+            "analysis_enabled",
+            "disabled_reason",
+            "provider_mappings",
+            "fallback_enabled",
+            "notes",
+        },
+        file_name=file_name,
+        seed_dir=seed_dir,
+    )
+
+    countries: list[TargetCountry] = []
+    for row_number, row in loaded.rows:
+        try:
+            payload = TargetCountryCreate(
+                country_code=_required_text(row, row_number, "country_code", loaded.result.errors),
+                name_cn=_required_text(row, row_number, "name_cn", loaded.result.errors),
+                name_en=_required_text(row, row_number, "name_en", loaded.result.errors),
+                region_code=_required_text(row, row_number, "region_code", loaded.result.errors),
+                region_name_cn=_optional_text(row, "region_name_cn"),
+                region_name_en=_optional_text(row, "region_name_en"),
+                continent=_optional_text(row, "continent"),
+                currency_code=_optional_text(row, "currency_code"),
+                languages=_list_value(row, "languages"),
+                default_sort_order=_optional_int(row, row_number, "default_sort_order", loaded.result.errors) or 0,
+                enabled=_optional_bool(row, row_number, "enabled", loaded.result.errors, default=True),
+                analysis_enabled=_optional_bool(row, row_number, "analysis_enabled", loaded.result.errors, default=True),
+                disabled_reason=_optional_text(row, "disabled_reason"),
+                provider_mappings=_json_object(row, row_number, "provider_mappings", loaded.result.errors),
+                fallback_enabled=_optional_bool(row, row_number, "fallback_enabled", loaded.result.errors, default=True),
+                notes=_optional_text(row, "notes"),
+            )
+        except ValueError as exc:
+            loaded.result.errors.append(
+                CsvImportErrorDetail(
+                    row_number=row_number,
+                    field="row",
+                    message=str(exc),
+                    raw_value=str(row)[:200],
+                )
+            )
+            continue
+        countries.append(TargetCountry(**payload.model_dump()))
+
+    return _insert_objects(db, loaded.result, countries, mode)
+
+
+def import_analysis_country_presets(
+    db: Session,
+    *,
+    file_name: str | None = None,
+    mode: ImportMode = "insert",
+    seed_dir: Path | None = None,
+) -> CsvImportResult:
+    loaded = _load_csv(
+        "analysis-country-presets",
+        "analysis_country_presets.csv",
+        mode,
+        required_headers={
+            "preset_code",
+            "name_cn",
+            "name_en",
+            "description",
+            "country_codes",
+            "industry_tags",
+            "region_code",
+            "is_default",
+            "sort_order",
+            "enabled",
+        },
+        file_name=file_name,
+        seed_dir=seed_dir,
+    )
+
+    presets: list[AnalysisCountryPreset] = []
+    for row_number, row in loaded.rows:
+        try:
+            payload = AnalysisCountryPresetCreate(
+                preset_code=_required_text(row, row_number, "preset_code", loaded.result.errors),
+                name_cn=_required_text(row, row_number, "name_cn", loaded.result.errors),
+                name_en=_optional_text(row, "name_en"),
+                description=_optional_text(row, "description"),
+                country_codes=_list_value(row, "country_codes"),
+                industry_tags=_list_value(row, "industry_tags"),
+                region_code=_optional_text(row, "region_code"),
+                is_default=_optional_bool(row, row_number, "is_default", loaded.result.errors, default=False),
+                sort_order=_optional_int(row, row_number, "sort_order", loaded.result.errors) or 0,
+                enabled=_optional_bool(row, row_number, "enabled", loaded.result.errors, default=True),
+            )
+        except ValueError as exc:
+            loaded.result.errors.append(
+                CsvImportErrorDetail(
+                    row_number=row_number,
+                    field="row",
+                    message=str(exc),
+                    raw_value=str(row)[:200],
+                )
+            )
+            continue
+        presets.append(AnalysisCountryPreset(**payload.model_dump()))
+
+    return _insert_objects(db, loaded.result, presets, mode)
 
 
 def import_trade_samples(
@@ -553,6 +683,80 @@ def _optional_text(row: dict[str, str], field: str) -> str | None:
         return None
     value = value.strip()
     return value or None
+
+
+def _list_value(row: dict[str, str], field: str) -> list[str]:
+    value = _optional_text(row, field)
+    if value is None:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [str(item).strip() for item in parsed if str(item).strip()]
+    return [part.strip() for part in re.split(r"[;|]", value) if part.strip()]
+
+
+def _json_object(
+    row: dict[str, str],
+    row_number: int,
+    field: str,
+    errors: list[CsvImportErrorDetail],
+) -> dict[str, object] | None:
+    value = _optional_text(row, field)
+    if value is None:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        errors.append(
+            CsvImportErrorDetail(
+                row_number=row_number,
+                field=field,
+                message="Invalid JSON object",
+                raw_value=value,
+            )
+        )
+        return None
+    if not isinstance(parsed, dict):
+        errors.append(
+            CsvImportErrorDetail(
+                row_number=row_number,
+                field=field,
+                message="JSON value must be an object",
+                raw_value=value,
+            )
+        )
+        return None
+    return parsed
+
+
+def _optional_bool(
+    row: dict[str, str],
+    row_number: int,
+    field: str,
+    errors: list[CsvImportErrorDetail],
+    *,
+    default: bool,
+) -> bool:
+    value = _optional_text(row, field)
+    if value is None:
+        return default
+    normalized = value.casefold()
+    if normalized in {"1", "true", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "no", "n"}:
+        return False
+    errors.append(
+        CsvImportErrorDetail(
+            row_number=row_number,
+            field=field,
+            message="Invalid boolean value",
+            raw_value=value,
+        )
+    )
+    return default
 
 
 def _required_int(

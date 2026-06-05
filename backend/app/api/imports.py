@@ -41,6 +41,24 @@ def import_market_profiles(
     return _run_import(csv_importer.import_market_profiles, db, request)
 
 
+@router.post("/target-countries", response_model=CsvImportResult)
+def import_target_countries(
+    payload: CsvImportRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> CsvImportResult:
+    request = payload or CsvImportRequest()
+    return _run_import(csv_importer.import_target_countries, db, request)
+
+
+@router.post("/analysis-country-presets", response_model=CsvImportResult)
+def import_analysis_country_presets(
+    payload: CsvImportRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> CsvImportResult:
+    request = payload or CsvImportRequest()
+    return _run_import(csv_importer.import_analysis_country_presets, db, request)
+
+
 @router.post("/trade-samples", response_model=CsvImportResult)
 def import_trade_samples(
     payload: CsvImportRequest | None = Body(default=None),

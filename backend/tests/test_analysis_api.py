@@ -127,6 +127,58 @@ def test_analysis_api_validates_product_ids_and_countries(
     assert bad_country.status_code == 422
 
 
+def test_analysis_api_caps_target_countries_after_dedupe(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_with_session
+    company_id, product_id = _seed_product(session_factory)
+    twenty_countries = [
+        "JP",
+        "KR",
+        "SG",
+        "MY",
+        "AE",
+        "GB",
+        "DE",
+        "FR",
+        "NL",
+        "IT",
+        "US",
+        "CA",
+        "MX",
+        "BR",
+        "CL",
+        "AU",
+        "NZ",
+        "ZA",
+        "EG",
+        "USA",
+    ]
+    too_many = [*twenty_countries, "CN", "AA"]
+
+    deduped_response = client.post(
+        "/api/analysis/run",
+        json={
+            "company_id": company_id,
+            "product_ids": [product_id],
+            "target_countries": twenty_countries,
+            "competitor_limit": 1,
+        },
+    )
+    too_many_response = client.post(
+        "/api/analysis/run",
+        json={
+            "company_id": company_id,
+            "product_ids": [product_id],
+            "target_countries": too_many,
+            "competitor_limit": 1,
+        },
+    )
+
+    assert deduped_response.status_code == 202
+    assert too_many_response.status_code == 422
+
+
 @pytest.fixture()
 def client_with_session() -> Generator[tuple[TestClient, sessionmaker[Session]], None, None]:
     engine = create_engine(

@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings, get_settings
+from app.core.countries import COUNTRY_CURRENCY
 from app.schemas import EtsyListingItem, EtsySearchResponse
 from app.services.analysis_performance import is_timeout_error, record_provider_http_call
 from app.services.providers import (
@@ -30,20 +31,6 @@ MAX_ETSY_RESULTS = 20
 ETSY_PLATFORM = "Etsy"
 ETSY_SAMPLE_PLATFORM = "Etsy Sample"
 ETSY_FALLBACK_PLATFORMS = {ETSY_PLATFORM.casefold(), ETSY_SAMPLE_PLATFORM.casefold()}
-
-COUNTRY_CURRENCY: dict[str, str] = {
-    "US": "USD",
-    "GB": "GBP",
-    "AU": "AUD",
-    "CA": "CAD",
-    "DE": "EUR",
-    "FR": "EUR",
-    "IT": "EUR",
-    "ES": "EUR",
-    "NL": "EUR",
-    "JP": "JPY",
-    "SG": "SGD",
-}
 
 FALLBACK_KEYWORD_ALIASES: dict[str, tuple[str, ...]] = {
     "home textile": (

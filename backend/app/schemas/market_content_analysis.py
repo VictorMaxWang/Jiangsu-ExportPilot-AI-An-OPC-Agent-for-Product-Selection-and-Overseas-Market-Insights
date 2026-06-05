@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.countries import DEFAULT_TARGET_COUNTRIES, normalize_country_codes
+
 
 class AnalysisSource(BaseModel):
     provider: str
@@ -51,25 +53,14 @@ class MarketCompareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     product_category: str = Field(min_length=1)
-    country_codes: list[str] = Field(default_factory=lambda: ["US", "GB", "JP", "AU", "SG"])
+    country_codes: list[str] = Field(default_factory=lambda: list(DEFAULT_TARGET_COUNTRIES))
     keyword: str | None = Field(default=None, min_length=1)
     hs_code: str | None = Field(default=None, min_length=1, max_length=16)
 
     @field_validator("country_codes")
     @classmethod
     def _clean_country_codes(cls, values: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            normalized = value.strip().upper()
-            if not normalized:
-                continue
-            if normalized not in seen:
-                cleaned.append(normalized)
-                seen.add(normalized)
-        if not cleaned:
-            raise ValueError("At least one country code is required")
-        return cleaned
+        return normalize_country_codes(values, field_name="country_codes")
 
 
 class MarketCompareResponse(BaseModel):

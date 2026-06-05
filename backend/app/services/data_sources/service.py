@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.core.countries import ISO2_TO_ISO3, normalize_country_code
 from app.core.config import Settings, get_settings
 from app.db import get_db
 from app.models import ApiCallLog, DataSourceCache
@@ -1038,10 +1039,10 @@ def _normalize_text(value: str) -> str:
 
 
 def _normalize_country_key(value: str) -> str:
-    normalized = value.strip().upper()
-    if len(normalized) not in {2, 3} or not normalized.isalpha():
-        raise ValueError("Country must be a two- or three-letter code")
-    return normalized
+    try:
+        return normalize_country_code(value)
+    except ValueError as exc:
+        raise ValueError("Country must be a two- or three-letter code") from exc
 
 
 def _normalize_optional_country(value: str | None) -> str | None:
@@ -1060,46 +1061,15 @@ def _normalize_hs_code(value: str) -> str:
 
 
 def _trade_partner_code(country: str) -> str:
-    mapping = {
-        "US": "USA",
-        "USA": "USA",
-        "GB": "GBR",
-        "GBR": "GBR",
-        "JP": "JPN",
-        "JPN": "JPN",
-        "AU": "AUS",
-        "AUS": "AUS",
-        "SG": "SGP",
-        "SGP": "SGP",
-        "CN": "CHN",
-        "CHN": "CHN",
-    }
-    return mapping.get(country.upper(), country.upper())
+    try:
+        normalized = normalize_country_code(country, allow_name_aliases=True)
+    except ValueError:
+        return country.upper()
+    return ISO2_TO_ISO3.get(normalized, normalized)
 
 
 def _country_matches(value: str, expected: str) -> bool:
-    normalized = value.strip().upper()
-    aliases = {
-        "CHINA": "CHN",
-        "CN": "CHN",
-        "CHN": "CHN",
-        "US": "USA",
-        "USA": "USA",
-        "UNITED STATES": "USA",
-        "GB": "GBR",
-        "GBR": "GBR",
-        "UNITED KINGDOM": "GBR",
-        "JP": "JPN",
-        "JPN": "JPN",
-        "JAPAN": "JPN",
-        "AU": "AUS",
-        "AUS": "AUS",
-        "AUSTRALIA": "AUS",
-        "SG": "SGP",
-        "SGP": "SGP",
-        "SINGAPORE": "SGP",
-    }
-    return aliases.get(normalized, normalized) == expected
+    return _trade_partner_code(value) == expected
 
 
 def _flow_matches(value: str, expected: str) -> bool:

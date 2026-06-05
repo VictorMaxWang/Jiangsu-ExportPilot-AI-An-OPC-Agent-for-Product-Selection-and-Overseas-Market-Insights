@@ -1,6 +1,20 @@
 country_code,country_name,gdp_per_capita,population,internet_penetration,market_size_level,competition_level,logistics_difficulty,notes
-US,United States,82769,342000000,92.0,high,high,medium,Large home textile market with strong Amazon and eBay price competition
-GB,United Kingdom,48913,68000000,96.0,medium,high,medium,High online shopping penetration and demand for compact bedding
-JP,Japan,33834,124000000,94.0,medium,medium,low,Quality sensitive market with stable demand for pet home and cooling bedding
-AU,Australia,64712,27000000,95.0,medium,medium,medium,Seasonal cooling and outdoor home textile opportunities
-SG,Singapore,84714,5900000,93.0,medium,medium,low,Small home and humid climate support compact bedding and quick dry textiles
+JP,Japan,33834,124000000,94.0,medium,medium,low,Quality sensitive mature market with stable demand for home and pet comfort products
+KR,South Korea,33121,51600000,97.0,medium,high,low,Highly connected e commerce market with strong design and trend sensitivity
+SG,Singapore,84714,5900000,93.0,medium,medium,low,Small high income market suited to compact bedding and quick dry textiles
+MY,Malaysia,11972,34000000,97.0,medium,medium,medium,ASEAN growth market with price aware consumers and regional platform reach
+AE,United Arab Emirates,52976,10400000,100.0,medium,medium,medium,Gulf retail and re export hub with premium product opportunities
+GB,United Kingdom,48913,68000000,96.0,medium,high,medium,High online shopping penetration and strong home goods competition
+DE,Germany,52746,84000000,93.0,high,high,low,Large EU market with strict quality expectations and strong logistics infrastructure
+FR,France,44500,68000000,93.0,high,high,medium,Mature lifestyle market with demand for design led home categories
+NL,Netherlands,62536,18000000,96.0,medium,high,low,EU logistics gateway with high e commerce penetration and dense competition
+IT,Italy,38373,59000000,76.0,medium,high,medium,Design focused consumer market with established home textile competition
+US,United States,82769,342000000,92.0,high,high,medium,Large home textile market with strong marketplace price competition
+CA,Canada,53372,40000000,94.0,medium,high,medium,Mature North American market with cross border logistics links
+MX,Mexico,13926,129000000,75.0,medium,medium,medium,Growing e commerce market with price sensitive demand and regional platform growth
+BR,Brazil,11000,203000000,84.0,medium,medium,high,Large Latin American market with logistics and tax complexity
+CL,Chile,17093,19600000,90.0,medium,medium,medium,Open trade market with stable digital adoption and smaller population scale
+AU,Australia,64712,27000000,95.0,medium,medium,medium,High income seasonal market with cooling and outdoor home textile demand
+NZ,New Zealand,48528,5300000,95.0,low,medium,medium,Small high income market often served through Australia aligned logistics
+ZA,South Africa,6253,62000000,74.0,medium,medium,high,African gateway market with mixed income segments and logistics variance
+EG,Egypt,3512,112000000,72.0,medium,medium,high,Large population market with Belt and Road relevance and price sensitivity
