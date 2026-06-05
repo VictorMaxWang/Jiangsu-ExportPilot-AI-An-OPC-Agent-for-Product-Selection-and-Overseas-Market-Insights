@@ -5,7 +5,7 @@ from typing import Any
 
 
 COMMON_SYSTEM_RULES = """You are the AI analysis service for SuPin ZhiHang, a Jiangsu export market insight platform.
-Use only the user-provided product and market context.
+Use only the user-provided product, company, and market context.
 Do not request, reveal, infer, or mention API keys, tokens, cookies, database URLs, request headers, or server configuration.
 Do not claim legal, customs, tax, investment, medical, or certification certainty.
 If evidence is missing, say the data is insufficient and use conservative wording.
@@ -219,6 +219,39 @@ Rules:
 - If images conflict or evidence is weak, use conservative fields, lower confidence_score, and add risk_notes.
 """
 
+COMPANY_PHOTO_UNDERSTANDING_PROMPT = """Analyze user-uploaded company photos or screenshots for company intake.
+Return only one valid JSON object. Do not wrap it in markdown.
+The JSON object must contain exactly these fields:
+{
+  "company_name": "string or null",
+  "credit_code_suffix": "last four characters only, or null",
+  "region": "string or null",
+  "industry": "string or null",
+  "description": "string or null",
+  "main_products": ["string"],
+  "target_countries": ["US"],
+  "website": "string or null",
+  "contact_role": "string or null",
+  "risk_notes": ["string"],
+  "confidence_score": 0.0,
+  "evidence": [
+    {"field": "company_name", "source": "photo_text", "image_index": 0, "image_role": "business_license", "value": "short visible excerpt"}
+  ]
+}
+Rules:
+- Use the image catalog supplied by the backend to identify image_index and image_role.
+- Treat the images as user-provided company materials such as a business license, business card, exhibition handout, catalog cover, brochure cover, website screenshot, or storefront screenshot.
+- Extract only company-building fields visible in the images or conservatively implied by visible product/category context.
+- Do not verify company qualification, legal status, certification validity, sales volume, awards, official registry status, tax status, customs status, or platform ranking.
+- Do not preserve or reveal personal phone numbers, ID card numbers, bank accounts, detailed addresses, QR code secrets, cookies, tokens, request headers, order numbers, or private contact details.
+- For unified social credit code, return only the last four characters in credit_code_suffix. Never return the full code.
+- target_countries must contain only conservative ISO-2 country codes when the image strongly suggests export destinations or suitable initial markets. Use [] when uncertain.
+- evidence[].source must be one of photo_text, photo_visual, manual_text, model_inference.
+- Every image-derived evidence item must include image_index and image_role from the catalog.
+- Keep evidence values short and do not include full OCR text.
+- If evidence is weak, conflicting, or privacy-like content appears, lower confidence_score and add risk_notes without copying sensitive content.
+"""
+
 URL_PRODUCT_UNDERSTANDING_PROMPT = """Analyze public product page text from a user-submitted domestic ecommerce URL.
 Return only one valid JSON object. Do not wrap it in markdown.
 The JSON object must contain exactly these fields:
@@ -351,6 +384,35 @@ def build_multi_screenshot_product_understanding_messages(
         )
     return [
         {"role": "system", "content": f"{COMMON_SYSTEM_RULES}\n{MULTI_SCREENSHOT_PRODUCT_UNDERSTANDING_PROMPT}"},
+        {"role": "user", "content": content},
+    ]
+
+
+def build_company_photo_understanding_messages(
+    payload: dict[str, Any],
+    images: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": json.dumps(payload, ensure_ascii=False, default=str),
+        }
+    ]
+    for image in images:
+        content.append(
+            {
+                "type": "text",
+                "text": f"image_index={image['image_index']} image_role={image['image_role']}",
+            }
+        )
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": image["image_data_url"]},
+            }
+        )
+    return [
+        {"role": "system", "content": f"{COMMON_SYSTEM_RULES}\n{COMPANY_PHOTO_UNDERSTANDING_PROMPT}"},
         {"role": "user", "content": content},
     ]
 

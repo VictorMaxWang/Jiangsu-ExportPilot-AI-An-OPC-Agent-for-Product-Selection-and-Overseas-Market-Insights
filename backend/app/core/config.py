@@ -74,6 +74,15 @@ class Settings(BaseSettings):
         gt=0,
         validation_alias=AliasChoices("MAX_PRODUCT_IMAGE_SIZE_MB", "SUPIN_MAX_PRODUCT_IMAGE_SIZE_MB"),
     )
+    company_upload_dir: str = Field(
+        default="storage/company-intake",
+        validation_alias=AliasChoices("COMPANY_UPLOAD_DIR", "SUPIN_COMPANY_UPLOAD_DIR"),
+    )
+    max_company_image_size_mb: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias=AliasChoices("MAX_COMPANY_IMAGE_SIZE_MB", "SUPIN_MAX_COMPANY_IMAGE_SIZE_MB"),
+    )
     enable_domestic_url_fetch: bool = Field(
         default=False,
         validation_alias=AliasChoices("ENABLE_DOMESTIC_URL_FETCH", "SUPIN_ENABLE_DOMESTIC_URL_FETCH"),

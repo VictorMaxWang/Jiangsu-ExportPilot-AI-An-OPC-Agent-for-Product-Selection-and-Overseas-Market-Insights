@@ -77,6 +77,7 @@ class CompanyDraft(TimestampMixin, Base):
     region: Mapped[str | None] = mapped_column(String(128), nullable=True)
     industry: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     main_products: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    target_countries: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     website: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     contact_role: Mapped[str | None] = mapped_column(String(128), nullable=True)

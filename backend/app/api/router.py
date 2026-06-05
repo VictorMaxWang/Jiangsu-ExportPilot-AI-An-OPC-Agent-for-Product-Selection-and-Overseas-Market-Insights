@@ -4,6 +4,7 @@ from app.api.admin import router as admin_router
 from app.api.analysis import router as analysis_router
 from app.api.ai import router as ai_router
 from app.api.companies import router as companies_router
+from app.api.company_intake import router as company_intake_router
 from app.api.data import router as data_router
 from app.api.data_sources import router as data_sources_router
 from app.api.dashboard import router as dashboard_router
@@ -24,6 +25,7 @@ api_router.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 api_router.include_router(analysis_router, prefix="/api/analysis", tags=["analysis"])
 api_router.include_router(ai_router, prefix="/api/ai", tags=["ai"])
 api_router.include_router(companies_router, prefix="/api/companies", tags=["companies"])
+api_router.include_router(company_intake_router, prefix="/api/company-intake", tags=["company-intake"])
 api_router.include_router(data_router, prefix="/api/data", tags=["data"])
 api_router.include_router(data_sources_router, prefix="/api/data-sources", tags=["data-sources"])
 api_router.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
