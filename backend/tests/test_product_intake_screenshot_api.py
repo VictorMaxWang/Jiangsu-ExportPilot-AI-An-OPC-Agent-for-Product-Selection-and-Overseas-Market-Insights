@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Generator
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 
@@ -391,6 +392,10 @@ def test_screenshot_upload_creates_job_asset_and_draft_with_safe_filename(
         assert draft is not None and draft.product_name_cn == "宠物凉感垫"
         assert draft.price_cny is not None
         assert draft.cost_price_cny is None
+        assert draft.image_count == 1
+        assert draft.evidence is not None
+        assert draft.evidence[0]["image_index"] == 0
+        assert draft.evidence[0]["image_role"] == "screenshot"
 
 
 def test_screenshot_ai_sensitive_evidence_is_redacted_in_response_and_db(
@@ -618,6 +623,217 @@ def test_get_job_and_draft_responses_do_not_expose_internal_file_details(
     assert "Cookie" not in combined
 
 
+def test_screenshots_upload_creates_multi_image_draft_with_image_evidence(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    payload = {
+        **_success_payload(),
+        "evidence": [
+            {
+                "field": "product_name_cn",
+                "source": "screenshot_text",
+                "image_index": 0,
+                "image_role": "main",
+                "value": "visible title",
+            },
+            {
+                "field": "material",
+                "source": "screenshot_visual",
+                "image_index": 1,
+                "image_role": "detail",
+                "value": "visible product detail",
+            },
+        ],
+    }
+    fake = FakeVisionClient(json.dumps(payload, ensure_ascii=False))
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshots",
+        data={"company_id": str(company_id), "source_platform": "jd", "image_roles[]": ["main", "detail"]},
+        files=[
+            ("files[]", ("main.png", _image_bytes("PNG"), "image/png")),
+            ("files[]", ("detail.jpg", _image_bytes("JPEG"), "image/jpeg")),
+        ],
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["job_status"] == "draft_ready"
+    assert payload["ai_result_type"] == "real_qwen"
+    assert payload["ai_fallback_used"] is False
+    assert payload["asset"]["image_index"] == 0
+    assert [asset["image_index"] for asset in payload["assets"]] == [0, 1]
+    assert [asset["image_role"] for asset in payload["assets"]] == ["main", "detail"]
+    assert payload["draft"]["image_count"] == 2
+    assert len(fake.calls) == 1
+    assert _image_part_count(fake.calls[0]["messages"]) == 2
+
+    with session_factory() as db:
+        job = db.get(ProductImportJob, payload["import_job_id"])
+        draft = db.get(ProductDraft, payload["draft_id"])
+        assets = list(
+            db.scalars(
+                select(ProductImportAsset).where(ProductImportAsset.import_job_id == payload["import_job_id"]).order_by(ProductImportAsset.image_index)
+            )
+        )
+        assert job is not None and job.source_type == "multi_image"
+        assert draft is not None and draft.image_count == 2
+        assert [(asset.image_index, asset.image_role, asset.is_primary) for asset in assets] == [
+            (0, "main", True),
+            (1, "detail", False),
+        ]
+        assert draft.evidence is not None
+        assert {item["image_index"] for item in draft.evidence} == {0, 1}
+        assert {item["image_role"] for item in draft.evidence} == {"main", "detail"}
+
+
+def test_screenshots_upload_rejects_more_than_eight_without_job_or_ai(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    fake = FakeVisionClient(_success_json())
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshots",
+        data={"company_id": str(company_id)},
+        files=[("files[]", (f"product-{index}.png", _image_bytes("PNG"), "image/png")) for index in range(9)],
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "TOO_MANY_IMAGES"
+    assert fake.calls == []
+    assert not (tmp_path / "uploads").exists()
+    with session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ProductImportJob)) == 0
+
+
+def test_screenshots_partial_invalid_image_creates_manual_required_draft(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    fake = FakeVisionClient(_success_json())
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshots",
+        data={"company_id": str(company_id), "image_roles[]": ["main", "detail"]},
+        files=[
+            ("files[]", ("main.png", _image_bytes("PNG"), "image/png")),
+            ("files[]", ("broken.png", b"not really a png", "image/png")),
+        ],
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["ai_result_type"] == "manual_required"
+    assert payload["ai_fallback_used"] is False
+    assert payload["job_status"] == "draft_ready_with_low_confidence"
+    assert payload["error_code"] == "PARTIAL_IMAGE_UPLOAD_FAILED"
+    assert payload["low_confidence"] is True
+    assert len(payload["assets"]) == 1
+    assert len(fake.calls) == 1
+    assert _image_part_count(fake.calls[0]["messages"]) == 1
+
+    draft_response = client.get(f"/api/product-intake/drafts/{payload['draft_id']}")
+    assert draft_response.status_code == 200
+    failed_images = draft_response.json()["multi_image_summary"]["failed_images"]
+    assert failed_images[0]["code"] == "INVALID_IMAGE_CONTENT"
+    with session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ProductImportAsset)) == 1
+        draft = db.get(ProductDraft, payload["draft_id"])
+        assert draft is not None and draft.confidence_score < Decimal("0.65")
+
+
+def test_screenshots_all_invalid_images_rejected_without_persistence(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    fake = FakeVisionClient(_success_json())
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshots",
+        data={"company_id": str(company_id)},
+        files=[("files[]", ("broken.png", b"not really a png", "image/png"))],
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "INVALID_IMAGE_CONTENT"
+    assert fake.calls == []
+    with session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ProductImportJob)) == 0
+        assert db.scalar(select(func.count()).select_from(ProductImportAsset)) == 0
+        assert db.scalar(select(func.count()).select_from(ProductDraft)) == 0
+
+
+def test_screenshots_ai_fallback_merges_individual_images_without_secret_leak(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, _session_factory = client_with_session
+    _configure_intake_env(monkeypatch, tmp_path)
+    fake = FakeSequenceVisionClient(
+        [
+            BailianUpstreamError("multi image limit raw body", status_code=400),
+            _success_json(),
+            BailianTimeoutError("Authorization: Bearer sentinel-secret"),
+        ]
+    )
+    app.dependency_overrides[get_bailian_client] = lambda: fake
+    company_id = _create_company(client)
+
+    response = client.post(
+        "/api/product-intake/screenshots",
+        data={"company_id": str(company_id), "source_platform": "taobao", "image_roles[]": ["main", "detail"]},
+        files=[
+            ("files[]", ("main.png", _image_bytes("PNG"), "image/png")),
+            ("files[]", ("detail.png", _image_bytes("PNG"), "image/png")),
+        ],
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["job_status"] == "draft_ready_with_low_confidence"
+    assert payload["ai_result_type"] == "manual_required"
+    assert payload["ai_fallback_used"] is True
+    assert payload["error_code"] == "PARTIAL_IMAGE_ANALYSIS_FAILED"
+    assert payload["draft"]["product_name_cn"]
+    assert len(fake.calls) == 3
+    assert _image_part_count(fake.calls[0]["messages"]) == 2
+    assert _image_part_count(fake.calls[1]["messages"]) == 1
+    assert _image_part_count(fake.calls[2]["messages"]) == 1
+    assert "sentinel-secret" not in response.text
+    assert "Authorization" not in response.text
+    assert "Bearer" not in response.text
+
+    draft_response = client.get(f"/api/product-intake/drafts/{payload['draft_id']}")
+    assert draft_response.status_code == 200
+    draft_payload = draft_response.json()
+    assert draft_payload["multi_image_summary"]["analysis_strategy"] == "per_image_fallback"
+    assert draft_payload["multi_image_summary"]["failed_images"][0]["code"] == "BAILIAN_TIMEOUT"
+    assert "sentinel-secret" not in draft_response.text
+
+
 class FakeVisionClient:
     def __init__(self, content: str | None = None, *, exc: Exception | None = None) -> None:
         self.content = content or _success_json()
@@ -643,6 +859,35 @@ class FakeVisionClient:
         if self.exc is not None:
             raise self.exc
         return BailianChatCompletion(content=self.content, model="qwen-vl-test")
+
+
+class FakeSequenceVisionClient:
+    def __init__(self, responses: list[str | Exception]) -> None:
+        self.responses = list(responses)
+        self.calls: list[dict[str, object]] = []
+
+    async def vision_chat(
+        self,
+        messages: list[dict[str, object]],
+        *,
+        temperature: float = 0.2,
+        max_tokens: int = 1800,
+        json_mode: bool = True,
+    ) -> BailianChatCompletion:
+        self.calls.append(
+            {
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "json_mode": json_mode,
+            }
+        )
+        if not self.responses:
+            raise AssertionError("FakeSequenceVisionClient received an unexpected call")
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return BailianChatCompletion(content=response, model="qwen-vl-test")
 
 
 def _configure_intake_env(
@@ -687,3 +932,17 @@ def _success_json() -> str:
 
 def _success_payload() -> dict[str, object]:
     return dict(SUCCESS_PAYLOAD)
+
+
+def _image_part_count(messages: object) -> int:
+    if not isinstance(messages, list):
+        return 0
+    count = 0
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        count += sum(1 for part in content if isinstance(part, dict) and part.get("type") == "image_url")
+    return count

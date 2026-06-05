@@ -180,6 +180,45 @@ Rules:
 - If privacy-like content appears, mention it only as a risk note without copying the private content.
 """
 
+MULTI_SCREENSHOT_PRODUCT_UNDERSTANDING_PROMPT = """Analyze user-uploaded product screenshots for product intake.
+Return only one valid JSON object. Do not wrap it in markdown.
+The JSON object must contain exactly these fields:
+{
+  "source_platform": "taobao|tmall|pinduoduo|jd|unknown",
+  "product_name_cn": "string or null",
+  "product_name_en": "string or null",
+  "category": "string or null",
+  "price_cny": 0.0,
+  "material": "string or null",
+  "specification": "string or null",
+  "dimensions": "string or null",
+  "weight_estimate": "string or null",
+  "color_options": ["string"],
+  "selling_points_cn": ["string"],
+  "selling_points_en": ["string"],
+  "target_users": ["string"],
+  "usage_scenarios": ["string"],
+  "cross_border_keywords_en": ["string"],
+  "risk_notes": ["string"],
+  "confidence_score": 0.0,
+  "evidence": [
+    {"field": "product_name_cn", "source": "screenshot_text", "image_index": 0, "image_role": "main", "value": "short visible excerpt"}
+  ]
+}
+Rules:
+- Use the image catalog supplied by the backend to identify image_index and image_role.
+- Treat all images as user-provided screenshots of one product unless clear visual evidence says otherwise.
+- Use visible screenshot text, visual product features, and conservative model inference only.
+- Do not guess hidden fields. Use null or [] when uncertain.
+- Do not claim sales volume, reviews, rankings, transaction data, platform verification, certifications, awards, effects, guarantees, or compliance status.
+- price_cny is only a visible reference/list price, not a transaction price or procurement cost.
+- product_name_en, selling_points_en, and cross_border_keywords_en may be translated draft suggestions.
+- evidence[].source must be one of screenshot_text, screenshot_visual, url_text, manual_text, model_inference.
+- Every evidence item for an image-derived field must include image_index and image_role from the catalog.
+- Keep evidence values short. Do not include private buyer identity, phone numbers, addresses, order numbers, account names, cookies, tokens, or full OCR text.
+- If images conflict or evidence is weak, use conservative fields, lower confidence_score, and add risk_notes.
+"""
+
 URL_PRODUCT_UNDERSTANDING_PROMPT = """Analyze public product page text from a user-submitted domestic ecommerce URL.
 Return only one valid JSON object. Do not wrap it in markdown.
 The JSON object must contain exactly these fields:
@@ -284,6 +323,35 @@ def build_screenshot_product_understanding_messages(
                 },
             ],
         },
+    ]
+
+
+def build_multi_screenshot_product_understanding_messages(
+    payload: dict[str, Any],
+    images: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": json.dumps(payload, ensure_ascii=False, default=str),
+        }
+    ]
+    for image in images:
+        content.append(
+            {
+                "type": "text",
+                "text": f"image_index={image['image_index']} image_role={image['image_role']}",
+            }
+        )
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": image["image_data_url"]},
+            }
+        )
+    return [
+        {"role": "system", "content": f"{COMMON_SYSTEM_RULES}\n{MULTI_SCREENSHOT_PRODUCT_UNDERSTANDING_PROMPT}"},
+        {"role": "user", "content": content},
     ]
 
 

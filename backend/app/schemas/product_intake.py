@@ -25,9 +25,11 @@ class ProductIntakeEvidenceItem(BaseModel):
 
     field: str = Field(min_length=1, max_length=128)
     source: EvidenceSource
+    image_index: int | None = Field(default=None, ge=0)
+    image_role: str | None = Field(default=None, max_length=64)
     value: str | None = Field(default=None, max_length=240)
 
-    @field_validator("field", "value", mode="before")
+    @field_validator("field", "image_role", "value", mode="before")
     @classmethod
     def _clean_text(cls, value: object) -> object:
         if value is None:
@@ -337,6 +339,23 @@ class ProductScreenshotIntakeResponse(BaseModel):
     error_message: str | None = None
     next_action: Literal["review_draft", "manual_review", "manual_fill"]
     asset: ProductImportAssetRead
+    draft: ProductDraftSummary
+
+
+class ProductScreenshotsIntakeResponse(BaseModel):
+    import_job_id: int
+    draft_id: int
+    job_status: str
+    draft_status: str
+    low_confidence: bool
+    ai_result_type: AiResultType
+    ai_fallback_used: bool
+    model_used: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    next_action: Literal["review_draft", "manual_review", "manual_fill"]
+    asset: ProductImportAssetRead
+    assets: list[ProductImportAssetRead]
     draft: ProductDraftSummary
 
 

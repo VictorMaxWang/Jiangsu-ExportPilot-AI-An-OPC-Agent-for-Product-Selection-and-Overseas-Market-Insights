@@ -297,13 +297,13 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
     return cleaned
 
 
-def _sanitize_evidence_update(value: object) -> list[dict[str, str | None]]:
+def _sanitize_evidence_update(value: object) -> list[dict[str, object]]:
     if value is None:
         return []
     if not isinstance(value, list):
         return []
 
-    sanitized: list[dict[str, str | None]] = []
+    sanitized: list[dict[str, object]] = []
     for item in value[:50]:
         if not isinstance(item, dict):
             continue
@@ -312,7 +312,14 @@ def _sanitize_evidence_update(value: object) -> list[dict[str, str | None]]:
         evidence_value = sanitize_intake_text(item.get("value"), max_length=180)
         if not field or not source:
             continue
-        sanitized.append({"field": field, "source": source, "value": evidence_value})
+        sanitized_item: dict[str, object] = {"field": field, "source": source, "value": evidence_value}
+        image_index = item.get("image_index")
+        if isinstance(image_index, int) and image_index >= 0:
+            sanitized_item["image_index"] = image_index
+        image_role = sanitize_intake_text(item.get("image_role"), max_length=64)
+        if image_role:
+            sanitized_item["image_role"] = image_role
+        sanitized.append(sanitized_item)
     return sanitized
 
 
@@ -385,7 +392,14 @@ def _evidence_lines(value: object) -> list[str]:
         field = sanitize_intake_text(item.get("field"), max_length=64)
         source = sanitize_intake_text(item.get("source"), max_length=64)
         evidence_value = sanitize_intake_text(item.get("value"), max_length=180)
-        parts = [part for part in (field, source) if part]
+        image_index = item.get("image_index")
+        image_role = sanitize_intake_text(item.get("image_role"), max_length=64)
+        image_context = None
+        if isinstance(image_index, int):
+            image_context = f"image_index={image_index}"
+            if image_role:
+                image_context = f"{image_context} image_role={image_role}"
+        parts = [part for part in (field, source, image_context) if part]
         if evidence_value:
             lines.append(f"{' / '.join(parts) or 'unknown'}: {evidence_value}")
     return lines

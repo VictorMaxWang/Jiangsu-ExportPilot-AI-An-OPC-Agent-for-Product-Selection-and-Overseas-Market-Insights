@@ -101,7 +101,13 @@ def test_update_draft_edits_allowed_fields_and_risk_notes(
             "confidence_score": "0.7200",
             "evidence": [
                 {"field": "material", "source": "url_text", "value": "尼龙材质"},
-                {"field": "price_cny", "source": "model_inference", "value": "参考价 49.90"},
+                {
+                    "field": "price_cny",
+                    "source": "model_inference",
+                    "image_index": 1,
+                    "image_role": "detail",
+                    "value": "参考价 49.90",
+                },
             ],
         },
     )
@@ -119,7 +125,13 @@ def test_update_draft_edits_allowed_fields_and_risk_notes(
     assert payload["confidence_score"] == "0.7200"
     assert payload["evidence"] == [
         {"field": "material", "source": "url_text", "value": "尼龙材质"},
-        {"field": "price_cny", "source": "model_inference", "value": "参考价 49.90"},
+        {
+            "field": "price_cny",
+            "source": "model_inference",
+            "value": "参考价 49.90",
+            "image_index": 1,
+            "image_role": "detail",
+        },
     ]
 
     with session_factory() as db:
@@ -129,7 +141,13 @@ def test_update_draft_edits_allowed_fields_and_risk_notes(
         assert draft.confidence_score == Decimal("0.7200")
         assert draft.evidence == [
             {"field": "material", "source": "url_text", "value": "尼龙材质"},
-            {"field": "price_cny", "source": "model_inference", "value": "参考价 49.90"},
+            {
+                "field": "price_cny",
+                "source": "model_inference",
+                "value": "参考价 49.90",
+                "image_index": 1,
+                "image_role": "detail",
+            },
         ]
         assert draft.selling_points is not None
         assert draft.selling_points["selling_points_cn"] == ["凉感面料"]

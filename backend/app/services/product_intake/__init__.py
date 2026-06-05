@@ -9,6 +9,7 @@ from app.services.product_intake.draft_review import (
 from app.services.product_intake.screenshot_analyzer import (
     ProductIntakeRequestError,
     analyze_screenshot_upload,
+    analyze_screenshot_uploads,
     get_draft_detail,
     get_job_detail,
 )
@@ -17,6 +18,7 @@ from app.services.product_intake.url_intake import analyze_url_intake
 __all__ = [
     "ProductIntakeRequestError",
     "analyze_screenshot_upload",
+    "analyze_screenshot_uploads",
     "analyze_url_intake",
     "confirm_product_draft",
     "get_draft_detail",

@@ -14,6 +14,7 @@ from app.schemas import (
     ProductImportJobDetailResponse,
     ProductRead,
     ProductScreenshotIntakeResponse,
+    ProductScreenshotsIntakeResponse,
     ProductUrlIntakeRequest,
     ProductUrlIntakeResponse,
 )
@@ -21,6 +22,7 @@ from app.services.ai import BailianClient
 from app.services.product_intake import (
     ProductIntakeRequestError,
     analyze_screenshot_upload,
+    analyze_screenshot_uploads,
     analyze_url_intake,
     confirm_product_draft,
     get_draft_detail,
@@ -52,6 +54,36 @@ async def upload_product_screenshot(
             company_id=company_id,
             upload=file,
             source_platform=source_platform,
+            client=client,
+        )
+    except ProductIntakeRequestError as exc:
+        raise _intake_http_exception(exc) from exc
+
+
+@router.post(
+    "/screenshots",
+    response_model=ProductScreenshotsIntakeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_product_screenshots(
+    company_id: int = Form(...),
+    source_platform: str | None = Form(default=None),
+    files_bracket: list[UploadFile] | None = File(default=None, alias="files[]"),
+    files_plain: list[UploadFile] | None = File(default=None, alias="files"),
+    image_roles_bracket: list[str] | None = Form(default=None, alias="image_roles[]"),
+    image_roles_plain: list[str] | None = Form(default=None, alias="image_roles"),
+    db: Session = Depends(get_db),
+    client: BailianClient = Depends(get_bailian_client),
+) -> ProductScreenshotsIntakeResponse:
+    uploads = [*(files_bracket or []), *(files_plain or [])]
+    image_roles = [*(image_roles_bracket or []), *(image_roles_plain or [])]
+    try:
+        return await analyze_screenshot_uploads(
+            db,
+            company_id=company_id,
+            uploads=uploads,
+            source_platform=source_platform,
+            image_roles=image_roles,
             client=client,
         )
     except ProductIntakeRequestError as exc:
