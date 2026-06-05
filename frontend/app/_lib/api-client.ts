@@ -132,6 +132,26 @@ export type AiStatusResponse = {
   vision: AiSmokeResponse;
 };
 
+export type AiChatRole = "system" | "user" | "assistant";
+
+export type AiChatMessage = {
+  role: AiChatRole;
+  content: string;
+};
+
+export type AiChatRequest = {
+  messages: AiChatMessage[];
+  temperature?: number;
+  max_tokens?: number;
+  json_mode?: boolean;
+};
+
+export type AiChatResponse = {
+  content: string;
+  model: string;
+  usage: Record<string, unknown> | null;
+};
+
 export type ProductDraftSellingPoints = {
   selling_points_cn?: string[];
   selling_points_en?: string[];
@@ -1139,6 +1159,14 @@ export async function getDashboard(
 ): Promise<DashboardResponse> {
   return requestJson<DashboardResponse>(`/api/dashboard/${analysisId}`, {
     cache: "no-store",
+    signal,
+  });
+}
+
+export async function chatWithAi(payload: AiChatRequest, signal?: AbortSignal): Promise<AiChatResponse> {
+  return requestJson<AiChatResponse>("/api/ai/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
     signal,
   });
 }

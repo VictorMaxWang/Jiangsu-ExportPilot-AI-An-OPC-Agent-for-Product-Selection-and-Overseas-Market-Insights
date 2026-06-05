@@ -15,6 +15,7 @@ import { FallbackNotice } from "../../_components/FallbackNotice";
 import { LoadingState } from "../../_components/LoadingState";
 import { MetricCard } from "../../_components/MetricCard";
 import { PageHeader } from "../../_components/PageHeader";
+import { useI18n } from "../../_components/LanguageProvider";
 import {
   DashboardCountryScore,
   DashboardDataSourceUsed,
@@ -34,6 +35,7 @@ type DashboardDetailWorkspaceProps = {
 };
 
 export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspaceProps) {
+  const { text } = useI18n();
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -153,7 +155,31 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
         </div>
       </div>
 
-      <div className="grid gap-4">
+      {dashboard.product_scores.length > 0 ? (
+        <section className="mt-5 rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
+          <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
+            <div>
+              <p className="text-sm font-semibold text-jade">{text("当前优先建议", "Current priority")}</p>
+              <h2 className="mt-2 text-2xl font-semibold text-ink">
+                {topRecommendation?.product_name ?? text("候选产品", "Candidate product")} · {topRecommendation?.country ?? topCountry?.country ?? text("目标市场", "Target market")}
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                {topRecommendation?.reason ?? text(
+                  "看板会把本次分析的最高机会分、国家排序、竞品价格带和风险提示汇总到下方模块。",
+                  "The dashboard summarizes the top opportunity score, country ranking, competitor price band, and risk notes below.",
+                )}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <SummaryPill label={text("最高机会分", "Top score")} value={formatScore(topRecommendation?.total_score)} />
+              <SummaryPill label={text("推荐市场", "Recommended market")} value={topCountry?.country ?? "-"} />
+              <SummaryPill label={text("竞品价格带", "Competitor price band")} value={formatPriceRange(topPriceRange)} />
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <div className="mt-5 grid gap-4">
         <FallbackNotice source="sample" title="Demo 数据说明" description={DEMO_SOURCE_NOTICE} />
         {fallbackUsed ? (
           <FallbackNotice
@@ -253,6 +279,15 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function SummaryPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+      <p className="text-xs font-semibold text-slate-500">{label}</p>
+      <p className="mt-1 truncate text-base font-semibold text-ink">{value}</p>
     </div>
   );
 }

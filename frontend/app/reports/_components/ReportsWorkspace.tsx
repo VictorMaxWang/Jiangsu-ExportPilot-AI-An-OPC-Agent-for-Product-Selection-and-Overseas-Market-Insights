@@ -8,6 +8,8 @@ import { FallbackNotice } from "../../_components/FallbackNotice";
 import { LoadingState } from "../../_components/LoadingState";
 import { MetricCard } from "../../_components/MetricCard";
 import { PageHeader } from "../../_components/PageHeader";
+import { SuccessState } from "../../_components/SuccessState";
+import { useI18n } from "../../_components/LanguageProvider";
 import {
   DashboardResponse,
   Report,
@@ -21,7 +23,10 @@ type ReportsWorkspaceProps = {
   initialAnalysisId: string;
 };
 
+type TextFn = (zh: string, en?: string) => string;
+
 export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
+  const { text } = useI18n();
   const [analysisIdInput, setAnalysisIdInput] = useState(initialAnalysisId);
   const [activeAnalysisId, setActiveAnalysisId] = useState<number | null>(parseAnalysisId(initialAnalysisId));
   const [reports, setReports] = useState<Report[]>([]);
@@ -198,14 +203,30 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
             description="部分数据源或 AI 步骤使用了兜底数据。发布商品或做投资决策前，请复核实时平台证据。"
           />
         ) : null}
-        {notice ? <p className="rounded-lg border border-jade/30 bg-jade/10 p-4 text-sm font-medium text-jade">{notice}</p> : null}
+        {notice ? (
+          <SuccessState
+            title={notice}
+            description={text(
+              "报告列表已同步更新，可继续查看、复制或返回看板复核来源。",
+              "The report list is updated. You can view, copy, or return to the dashboard to verify sources.",
+            )}
+          />
+        ) : null}
         {error ? <ErrorState message={error} /> : null}
       </div>
 
       <section className="mt-5 rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-ink">报告列表</h2>
-          {activeAnalysisId ? <span className="text-sm text-slate-500">当前仅显示 analysis_id = {activeAnalysisId} 的报告</span> : null}
+          <div>
+            <h2 className="text-lg font-semibold text-ink">报告列表</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {text(
+                "优先查看 HTML/Markdown 报告；PDF 状态以徽章展示，避免遮挡主要操作。",
+                "HTML/Markdown reports are primary; PDF status is shown as a badge so the main actions stay clear.",
+              )}
+            </p>
+          </div>
+          {activeAnalysisId ? <span className="rounded-md bg-river/10 px-2.5 py-1 text-xs font-semibold text-river">analysis_id = {activeAnalysisId}</span> : null}
         </div>
         <div className="mt-4">
           {loading ? (
@@ -215,9 +236,14 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
               title="暂无报告"
               description={activeAnalysisId ? "可为该分析生成报告，或等待分析工作流完成。" : "请输入分析 ID，或运行一次分析来创建报告。"}
               action={
-                <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/analysis/run">
-                  运行分析
-                </Link>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Link className="rounded-md bg-river px-4 py-2 text-sm font-semibold text-white" href="/analysis/run">
+                    {text("运行分析", "Run analysis")}
+                  </Link>
+                  <Link className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-ink" href="/products/import">
+                    {text("智能导入", "Smart intake")}
+                  </Link>
+                </div>
               }
             />
           ) : (
@@ -227,6 +253,7 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
                   key={report.id}
                   copied={copiedReportId === report.id}
                   report={report}
+                  text={text}
                   onCopy={() => void copyMarkdown(report)}
                 />
               ))}
@@ -238,40 +265,47 @@ export function ReportsWorkspace({ initialAnalysisId }: ReportsWorkspaceProps) {
   );
 }
 
-function ReportCard({ report, copied, onCopy }: { report: Report; copied: boolean; onCopy: () => void }) {
+function ReportCard({ report, copied, text, onCopy }: { report: Report; copied: boolean; text: TextFn; onCopy: () => void }) {
   return (
-    <article className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <h3 className="text-base font-semibold text-ink">{report.title}</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="min-w-0 text-base font-semibold text-ink">{report.title}</h3>
+            <AssetBadge label={report.pdf_url ? text("PDF 已就绪", "PDF ready") : text("PDF 部署版开启", "PDF in deployment")} tone={report.pdf_url ? "ready" : "pending"} />
+          </div>
           <p className="mt-1 text-sm text-slate-500">
             报告 #{report.id} · 分析 #{report.analysis_id} · {formatDate(report.created_at)}
           </p>
           <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
-            <span className="rounded-md bg-white px-2 py-1 text-slate-600">Markdown {report.content_markdown ? "已生成" : "缺失"}</span>
-            <span className="rounded-md bg-white px-2 py-1 text-slate-600">HTML {report.content_html ? "已生成" : "缺失"}</span>
-            <span className="rounded-md bg-white px-2 py-1 text-slate-600">
-              PDF {report.pdf_url ? "已就绪" : "部署版开启"}
-            </span>
+            <AssetBadge label={`Markdown ${report.content_markdown ? text("已生成", "ready") : text("缺失", "missing")}`} tone={report.content_markdown ? "ready" : "missing"} />
+            <AssetBadge label={`HTML ${report.content_html ? text("已生成", "ready") : text("缺失", "missing")}`} tone={report.content_html ? "ready" : "missing"} />
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <Link className="rounded-md bg-river px-3 py-2 text-sm font-semibold text-white" href={`/reports/${report.id}`}>
-            查看
+            {text("查看", "View")}
           </Link>
           <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700" type="button" onClick={onCopy}>
-            {copied ? "已复制" : "复制 Markdown"}
+            {copied ? text("已复制", "Copied") : text("复制 Markdown", "Copy Markdown")}
           </button>
           <Link className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700" href={`/dashboard/${report.analysis_id}`}>
-            看板
+            {text("看板", "Dashboard")}
           </Link>
-          <button className="cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-400" disabled type="button">
-            PDF 导出将在部署版开启；当前支持 Markdown/HTML 报告。
-          </button>
         </div>
       </div>
     </article>
   );
+}
+
+function AssetBadge({ label, tone }: { label: string; tone: "ready" | "pending" | "missing" }) {
+  const className =
+    tone === "ready"
+      ? "bg-jade/10 text-jade ring-jade/20"
+      : tone === "pending"
+        ? "bg-wheat/15 text-ink ring-wheat/30"
+        : "bg-slate-100 text-slate-500 ring-slate-200";
+  return <span className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 ${className}`}>{label}</span>;
 }
 
 function parseAnalysisId(value: string): number | null {

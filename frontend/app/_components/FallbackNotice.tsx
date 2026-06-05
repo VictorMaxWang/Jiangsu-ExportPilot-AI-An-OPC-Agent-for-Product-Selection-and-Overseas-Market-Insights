@@ -19,8 +19,13 @@ const sourceLabels: Record<FallbackSource, string> = {
 
 export function FallbackNotice({ source, title, description }: FallbackNoticeProps) {
   return (
-    <aside className="rounded-lg border border-wheat/40 bg-wheat/10 p-4">
-      <p className="text-sm font-semibold text-ink">{title ?? sourceLabels[source]}</p>
+    <aside className="rounded-lg border border-wheat/40 bg-wheat/10 p-4 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-md bg-white/80 px-2 py-1 text-xs font-semibold text-ink ring-1 ring-wheat/30">
+          {sourceLabels[source]}
+        </span>
+        <p className="text-sm font-semibold text-ink">{title ?? sourceLabels[source]}</p>
+      </div>
       {description ? <p className="mt-2 text-sm leading-6 text-slate-700">{description}</p> : null}
     </aside>
   );

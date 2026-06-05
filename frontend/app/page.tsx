@@ -12,58 +12,60 @@ export default function HomePage() {
   const { text } = useI18n();
   const workflowSteps = [
     {
-      title: text("企业产品输入", "Company and Product Input"),
-      description: text("录入江苏制造企业、产业带优势、候选产品和目标市场。", "Enter manufacturer profiles, cluster strengths, candidate products, and target markets."),
+      title: text("上传截图/链接", "Upload screenshots or links"),
+      description: text("从淘宝、京东、拼多多等商品截图或单个公开链接开始，避免把密钥或平台账号暴露到前端。", "Start from product screenshots or a single public product URL without exposing keys or platform accounts in the frontend."),
     },
     {
-      title: text("多源数据融合", "Multi-source Data Fusion"),
-      description: text("汇总 World Bank、GDELT、YouTube、Etsy、可选 UN Comtrade 与 CSV 样本。", "Combine World Bank, GDELT, YouTube, Etsy, optional UN Comtrade, and CSV samples."),
+      title: text("Qwen 识别", "Qwen recognition"),
+      description: text("后端调用百炼 Qwen 视觉/文本能力，提取品名、材质、价格、卖点和证据来源。", "The backend calls Bailian Qwen vision/text capabilities to extract product names, material, price, selling points, and evidence."),
     },
     {
-      title: text("智能体分析", "Agent Analysis"),
-      description: text("后端调用阿里云百炼 qwen3.6-plus，生成洞察、解释和营销草稿。", "The backend calls Alibaba Cloud Bailian qwen3.6-plus for insights, explanations, and marketing drafts."),
+      title: text("产品草稿", "Product draft"),
+      description: text("人工复核低置信度字段，确认后进入正式产品库，保留截图/链接证据边界。", "Review low-confidence fields, confirm into the catalog, and keep screenshot/link evidence boundaries."),
     },
     {
-      title: text("机会评分", "Opportunity Scoring"),
-      description: text("输出需求、竞争、宏观环境、内容热度、贸易信号和风险因子。", "Score demand, competition, macro environment, content momentum, trade signals, and risk factors."),
+      title: text("出海分析", "Export analysis"),
+      description: text("选择目标市场后，工作流融合公开 API、CSV 兜底、竞品样本、趋势内容和 AI 解释。", "After target-market selection, the workflow combines public APIs, CSV fallback, competitor samples, trend content, and AI explanations."),
     },
     {
-      title: text("营销生成", "Marketing Generation"),
-      description: text("生成标题、卖点、广告文案、短视频脚本和社媒内容草稿。", "Generate titles, selling points, ad copy, short video scripts, and social content drafts."),
-    },
-    {
-      title: text("出海报告", "Export Report"),
-      description: text("整理成可复制的比赛演示报告和企业初步决策材料。", "Package findings into a copy-ready demo report and initial decision material."),
+      title: text("看板/报告", "Dashboard and reports"),
+      description: text("用看板讲清楚机会排序、风险与来源，再生成可复核的出海报告。", "Use dashboards to explain opportunity ranking, risks, and sources, then generate reviewable export reports."),
     },
   ];
 
   return (
     <div className="grid gap-8">
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-panel">
-        <div className="grid gap-8 p-6 md:grid-cols-[1.2fr_0.8fr] md:p-10">
+        <div className="grid gap-8 p-6 md:grid-cols-[1.08fr_0.92fr] md:p-10">
           <div>
-            <p className="text-sm font-semibold text-jade">{text("AI 出海选品平台", "AI Export Opportunity Platform")}</p>
+            <p className="text-sm font-semibold text-jade">{text("截图/链接到出海报告", "From product intake to export report")}</p>
             <h1 className="mt-4 text-4xl font-semibold tracking-normal text-ink sm:text-5xl">
               {text("苏品智航", "Jiangsu ExportPilot")}
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600">
               {text(
-                "面向江苏制造企业出海的 AI 选品与海外市场洞察智能体。整合产品信息、CSV 样本、World Bank、GDELT、YouTube、Etsy 与可选 UN Comtrade 数据，由后端调用阿里云百炼 qwen3.6-plus 生成评分解释、营销草稿与出海报告。",
-                "An AI product selection and overseas market insight agent for Jiangsu manufacturers. It combines product information, CSV samples, World Bank, GDELT, YouTube, Etsy, and optional UN Comtrade data, then uses Alibaba Cloud Bailian qwen3.6-plus to generate scoring explanations, marketing drafts, and export reports.",
+                "面向江苏制造企业的 AI 出海选品工作台：上传商品截图或链接，由后端 Qwen 识别生成产品草稿，确认后启动海外市场分析，并沉淀看板、营销文案和出海报告。",
+                "An AI export product-selection workspace for Jiangsu manufacturers: upload product screenshots or URLs, let backend Qwen recognition create product drafts, confirm them, then run overseas market analysis and produce dashboards, copy, and reports.",
               )}
             </p>
-            <p className="mt-5 rounded-lg bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-ink ring-1 ring-slate-200">
+            <p className="mt-5 rounded-lg bg-river/5 px-4 py-3 text-sm font-semibold leading-6 text-ink ring-1 ring-river/20">
               {text(
-                "主流程：企业产品输入 → 多源数据融合 → 智能体分析 → 机会评分 → 营销生成 → 出海报告",
-                "Workflow: company/product input → multi-source data fusion → agent analysis → opportunity scoring → marketing generation → export report",
+                "主流程：上传截图/链接 → Qwen 识别 → 产品草稿 → 出海分析 → 看板/报告",
+                "Workflow: upload screenshots/URLs → Qwen recognition → product draft → export analysis → dashboard/reports",
               )}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
-                href="/analysis/run"
+                href="/products/import"
                 className="rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#12566d]"
               >
-                {text("进入演示流程", "Start Demo Workflow")}
+                {text("上传截图或链接", "Upload screenshots or URL")}
+              </Link>
+              <Link
+                href="/analysis/run"
+                className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-slate-50"
+              >
+                {text("运行出海分析", "Run export analysis")}
               </Link>
               <Link
                 href="/reports"
@@ -74,7 +76,7 @@ export default function HomePage() {
             </div>
           </div>
           <div className="rounded-lg bg-slate-50 p-5">
-            <h2 className="text-base font-semibold text-ink">{text("演示流程", "Demo Workflow")}</h2>
+            <h2 className="text-base font-semibold text-ink">{text("出海主路径", "Primary export path")}</h2>
             <ol className="mt-4 grid gap-3">
               {workflowSteps.map((step, index) => (
                 <li key={step.title}>

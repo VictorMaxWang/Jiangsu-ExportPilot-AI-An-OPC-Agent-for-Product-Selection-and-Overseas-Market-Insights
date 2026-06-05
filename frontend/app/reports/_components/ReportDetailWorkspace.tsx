@@ -9,6 +9,7 @@ import { FallbackNotice } from "../../_components/FallbackNotice";
 import { LoadingState } from "../../_components/LoadingState";
 import { MetricCard } from "../../_components/MetricCard";
 import { PageHeader } from "../../_components/PageHeader";
+import { SuccessState } from "../../_components/SuccessState";
 import {
   DashboardResponse,
   Report,
@@ -182,9 +183,6 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
           >
             {regenerating ? "重新生成中" : "重新生成报告"}
           </button>
-          <button className="cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-400" disabled type="button">
-            PDF 导出将在部署版开启；当前支持 Markdown/HTML 报告。
-          </button>
         </div>
       </div>
 
@@ -192,10 +190,10 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
         <MetricCard label="最高推荐国家" value={dashboard?.country_scores[0]?.country ?? "-"} helperText="来自看板聚合结果" />
         <MetricCard label="最高分" value={formatScore(dashboard?.top_recommendations[0]?.total_score)} helperText="后端评分结果" />
         <MetricCard label="来源数" value={dashboard?.data_sources_used.length ?? "-"} helperText="API、样本与兜底标签" />
-        <MetricCard label="PDF" value={report.pdf_url ? "已就绪" : "部署版开启"} helperText="PDF 导出将在部署版开启；当前支持 Markdown/HTML 报告。" />
+        <MetricCard label="PDF" value={report.pdf_url ? "已就绪" : "部署版开启"} helperText="当前优先交付 HTML/Markdown；PDF 状态仅作为能力提示。" />
       </div>
 
-      {notice ? <p className="mt-5 rounded-lg border border-jade/30 bg-jade/10 p-4 text-sm font-medium text-jade">{notice}</p> : null}
+      {notice ? <div className="mt-5"><SuccessState title={notice} description="新报告已保存，可继续复制 Markdown 或返回看板复核来源。" /></div> : null}
 
       <div className="mt-5 grid gap-4">
         <FallbackNotice
