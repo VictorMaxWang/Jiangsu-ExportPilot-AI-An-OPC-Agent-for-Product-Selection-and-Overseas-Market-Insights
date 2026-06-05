@@ -16,6 +16,7 @@ import { LoadingState } from "../../_components/LoadingState";
 import { MetricCard } from "../../_components/MetricCard";
 import { PageHeader } from "../../_components/PageHeader";
 import {
+  DashboardCountryScore,
   DashboardDataSourceUsed,
   DashboardPriceRange,
   DashboardRecommendation,
@@ -220,6 +221,8 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
                 <CountryRecommendationChart items={dashboard.country_scores} />
               </ChartPanel>
 
+              <CountryRankingPanel items={dashboard.country_scores} />
+
               <ChartPanel
                 title="竞品价格区间"
                 description="展示公开 API 或样本竞品的最低价、中位价和最高价。"
@@ -251,6 +254,55 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
         </>
       )}
     </div>
+  );
+}
+
+function CountryRankingPanel({ items }: { items: DashboardCountryScore[] }) {
+  const rankedItems = [...items].sort((left, right) => toNumber(right.top_score) - toNumber(left.top_score));
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-lg font-semibold text-ink">全部国家排名</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">展示本次分析覆盖的所有目标国家，按最高机会分排序。</p>
+        </div>
+        <span className="rounded-md bg-river/10 px-2.5 py-1 text-xs font-semibold text-river">
+          {rankedItems.length} 个国家
+        </span>
+      </div>
+      {rankedItems.length === 0 ? (
+        <div className="mt-4">
+          <EmptyState title="暂无国家排名" description="当前分析没有可展示的国家聚合评分。" />
+        </div>
+      ) : (
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="border-b border-slate-200 text-xs font-semibold text-slate-500">
+              <tr>
+                <th className="whitespace-nowrap px-3 py-2">排名</th>
+                <th className="whitespace-nowrap px-3 py-2">国家</th>
+                <th className="whitespace-nowrap px-3 py-2">最高分</th>
+                <th className="whitespace-nowrap px-3 py-2">平均分</th>
+                <th className="whitespace-nowrap px-3 py-2">推荐条目</th>
+                <th className="min-w-[180px] px-3 py-2">领先产品</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rankedItems.map((item, index) => (
+                <tr key={item.country} className="align-top">
+                  <td className="whitespace-nowrap px-3 py-3 font-semibold text-ink">#{index + 1}</td>
+                  <td className="whitespace-nowrap px-3 py-3 font-semibold text-river">{item.country}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-ink">{formatScore(item.top_score)}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-slate-700">{formatScore(item.average_score)}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-slate-700">{item.recommendation_count}</td>
+                  <td className="px-3 py-3 text-slate-600">{item.top_product_name ?? "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

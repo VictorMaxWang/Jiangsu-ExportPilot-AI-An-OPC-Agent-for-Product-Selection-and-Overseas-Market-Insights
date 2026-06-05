@@ -71,6 +71,7 @@ export function buildScoreRankingOption(items: ScoreRankingDatum[]): EChartsOpti
 }
 
 export function buildCountryScoreOption(items: CountryScoreDatum[]): EChartsOption {
+  const sorted = [...items].sort((left, right) => left.topScore - right.topScore);
   return {
     color: [jade, wheat],
     tooltip: {
@@ -82,34 +83,40 @@ export function buildCountryScoreOption(items: CountryScoreDatum[]): EChartsOpti
       bottom: 0,
       textStyle: { color: axisLabelColor },
     },
-    grid: { left: 12, right: 18, top: 18, bottom: 42, containLabel: true },
+    grid: { left: 16, right: 28, top: 18, bottom: 42, containLabel: true },
     xAxis: {
-      type: "category",
-      data: items.map((item) => item.country),
-      axisLabel: { color: axisLabelColor },
-      axisTick: { show: false },
-    },
-    yAxis: {
       type: "value",
       min: 0,
       max: 100,
       axisLabel: { color: axisLabelColor },
       splitLine: { lineStyle: { color: gridBorderColor } },
     },
+    yAxis: {
+      type: "category",
+      data: sorted.map((item) => item.country),
+      axisLabel: { color: axisLabelColor },
+      axisTick: { show: false },
+    },
     series: [
       {
         name: "平均分",
         type: "bar",
-        data: items.map((item) => item.averageScore),
-        barMaxWidth: 24,
-        itemStyle: { borderRadius: [6, 6, 0, 0] },
+        data: sorted.map((item) => item.averageScore),
+        barMaxWidth: 16,
+        itemStyle: { borderRadius: [0, 5, 5, 0] },
       },
       {
         name: "最高分",
-        type: "line",
-        data: items.map((item) => item.topScore),
-        symbolSize: 8,
-        smooth: true,
+        type: "bar",
+        data: sorted.map((item) => item.topScore),
+        barMaxWidth: 16,
+        itemStyle: { borderRadius: [0, 5, 5, 0] },
+        label: {
+          show: true,
+          position: "right",
+          color: "#172033",
+          formatter: "{c}",
+        },
       },
     ],
   };

@@ -10,6 +10,7 @@ type CountryRecommendationChartProps = {
 };
 
 export function CountryRecommendationChart({ items }: CountryRecommendationChartProps) {
+  const chartHeight = Math.max(320, items.length * 38 + 88);
   const option = useMemo(() => {
     const chartItems = items.map((item) => ({
       country: item.country,
@@ -20,7 +21,7 @@ export function CountryRecommendationChart({ items }: CountryRecommendationChart
     return buildCountryScoreOption(chartItems);
   }, [items]);
 
-  return <BaseEChart option={option} />;
+  return <BaseEChart height={chartHeight} option={option} />;
 }
 
 function toNumber(value: string | number | null | undefined): number {

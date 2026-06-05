@@ -10,6 +10,7 @@ import { FallbackNotice } from "../../../_components/FallbackNotice";
 import { LoadingState } from "../../../_components/LoadingState";
 import { useI18n } from "../../../_components/LanguageProvider";
 import {
+  AnalysisCountryPresetCatalogItem,
   AnalysisPerformanceResponse,
   AnalysisStatusResponse,
   AnalysisStepLog,
@@ -22,17 +23,43 @@ import {
   getAnalysisStatus,
   getFriendlyErrorMessage,
   listProductIntakeDrafts,
+  listMarketPresets,
   listCompanies,
   listProducts,
+  listTargetCountries,
   startAnalysisRun,
+  TargetCountryCatalogItem,
 } from "../../../_lib/api-client";
 
 const POLL_INTERVAL_MS = 1500;
-const DEMO_COUNTRY_INPUT = "US, JP, GB";
 const DEMO_PRODUCT_COUNT = 3;
 const DEFAULT_COMPETITOR_LIMIT = 20;
+const MAX_TARGET_COUNTRIES = 20;
 
 const STEP_IDS = Object.keys(AGENT_STEP_LABELS);
+
+type TextFn = (zh: string, en?: string) => string;
+
+type CountryGroupKey = "asia" | "europe" | "north_america" | "latam" | "oceania" | "africa";
+
+type CountryGroupDefinition = {
+  key: CountryGroupKey;
+  labelZh: string;
+  labelEn: string;
+};
+
+type CountryGroup = CountryGroupDefinition & {
+  items: TargetCountryCatalogItem[];
+};
+
+const COUNTRY_GROUPS: CountryGroupDefinition[] = [
+  { key: "asia", labelZh: "亚洲", labelEn: "Asia" },
+  { key: "europe", labelZh: "欧洲", labelEn: "Europe" },
+  { key: "north_america", labelZh: "北美", labelEn: "North America" },
+  { key: "latam", labelZh: "拉美", labelEn: "Latin America" },
+  { key: "oceania", labelZh: "大洋洲", labelEn: "Oceania" },
+  { key: "africa", labelZh: "非洲", labelEn: "Africa" },
+];
 
 type EvidenceCard = {
   key: string;
@@ -48,9 +75,11 @@ export function AnalysisRunWorkspace() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [recentIntakeDrafts, setRecentIntakeDrafts] = useState<ProductDraft[]>([]);
+  const [targetCountries, setTargetCountries] = useState<TargetCountryCatalogItem[]>([]);
+  const [countryPresets, setCountryPresets] = useState<AnalysisCountryPresetCatalogItem[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
-  const [countryInput, setCountryInput] = useState(DEMO_COUNTRY_INPUT);
+  const [selectedCountryCodes, setSelectedCountryCodes] = useState<string[]>([]);
   const [competitorLimit, setCompetitorLimit] = useState(DEFAULT_COMPETITOR_LIMIT);
   const [loading, setLoading] = useState(true);
   const [productsLoading, setProductsLoading] = useState(false);
@@ -105,6 +134,29 @@ export function AnalysisRunWorkspace() {
     () => products.filter((product) => selectedProductIds.includes(product.id)),
     [products, selectedProductIds],
   );
+
+  const availableTargetCountries = useMemo(
+    () => targetCountries.filter((country) => country.enabled && country.analysis_enabled),
+    [targetCountries],
+  );
+
+  const countriesByCode = useMemo(
+    () => new Map(availableTargetCountries.map((country) => [country.country_code, country])),
+    [availableTargetCountries],
+  );
+
+  const countryGroups = useMemo(() => buildCountryGroups(availableTargetCountries), [availableTargetCountries]);
+
+  const matchedPreset = useMemo(
+    () => countryPresets.find((preset) => sameCountrySet(preset.country_codes, selectedCountryCodes)) ?? null,
+    [countryPresets, selectedCountryCodes],
+  );
+
+  const currentPresetName = matchedPreset ? presetDisplayName(matchedPreset, text) : text("自定义组合", "Custom set");
+  const selectedCountryCount = selectedCountryCodes.length;
+  const countrySelectionInvalid = selectedCountryCount === 0 || selectedCountryCount > MAX_TARGET_COUNTRIES;
+  const countryCatalogReady = availableTargetCountries.length > 0;
+  const analysisCombinationCount = selectedProductIds.length * selectedCountryCount;
 
   const selectedLowConfidenceImportDraft = useMemo(
     () =>
@@ -177,11 +229,17 @@ export function AnalysisRunWorkspace() {
     setLoading(true);
     setError(null);
     try {
-      const companyResponse = await listCompanies();
+      const [companyResponse, countryResponse, presetResponse] = await Promise.all([
+        listCompanies(),
+        listTargetCountries(),
+        listMarketPresets(),
+      ]);
       setCompanies(companyResponse.items);
+      setTargetCountries(countryResponse.items);
+      setCountryPresets(presetResponse.items);
       const firstCompany = companyResponse.items[0] ?? null;
       setSelectedCompanyId(firstCompany?.id ?? null);
-      setCountryInput(DEMO_COUNTRY_INPUT);
+      setSelectedCountryCodes(defaultCountryCodes(countryResponse.items, presetResponse.items));
       setCompetitorLimit(DEFAULT_COMPETITOR_LIMIT);
       if (firstCompany) {
         await Promise.all([loadProducts(firstCompany.id, true), loadRecentIntakeDrafts(firstCompany.id)]);
@@ -191,6 +249,9 @@ export function AnalysisRunWorkspace() {
         setRecentIntakeDrafts([]);
       }
     } catch (requestError) {
+      setTargetCountries([]);
+      setCountryPresets([]);
+      setSelectedCountryCodes([]);
       setError(getFriendlyErrorMessage(requestError));
     } finally {
       setLoading(false);
@@ -221,7 +282,7 @@ export function AnalysisRunWorkspace() {
     resetRunState();
     setSelectedCompanyId(companyId);
     setSelectedProductIds([]);
-    setCountryInput(DEMO_COUNTRY_INPUT);
+    setSelectedCountryCodes(defaultCountryCodes(targetCountries, countryPresets));
     if (companyId) {
       void loadProducts(companyId, true);
       void loadRecentIntakeDrafts(companyId);
@@ -234,15 +295,23 @@ export function AnalysisRunWorkspace() {
   async function applyRecommendedDemoConfig() {
     const demoCompany = companies[0] ?? null;
     if (!demoCompany) {
-      setError("请先创建企业，再使用推荐演示配置。");
+      setError(text("请先创建企业，再使用推荐演示配置。", "Create a company before applying demo settings."));
       return;
     }
     resetRunState();
     setSelectedCompanyId(demoCompany.id);
-    setCountryInput(DEMO_COUNTRY_INPUT);
+    const demoCountries = defaultCountryCodes(targetCountries, countryPresets);
+    setSelectedCountryCodes(demoCountries);
     setCompetitorLimit(DEFAULT_COMPETITOR_LIMIT);
     await Promise.all([loadProducts(demoCompany.id, true), loadRecentIntakeDrafts(demoCompany.id)]);
-    setNotice("已应用推荐演示配置：首个企业、前 3 个产品、US/JP/GB 和 20 条竞品采集上限。");
+    const demoPreset = countryPresets.find((preset) => sameCountrySet(preset.country_codes, demoCountries)) ?? null;
+    const demoPresetName = demoPreset ? presetDisplayName(demoPreset, text) : demoCountries.join(", ");
+    setNotice(
+      text(
+        `已应用推荐演示配置：首个企业、前 3 个产品、${demoPresetName} 和 20 条竞品采集上限。`,
+        `Applied demo settings: first company, first 3 products, ${demoPresetName}, and 20 competitor samples.`,
+      ),
+    );
   }
 
   function toggleProduct(productId: number, checked: boolean) {
@@ -255,6 +324,38 @@ export function AnalysisRunWorkspace() {
         return current;
       }
       return [...current, productId];
+    });
+  }
+
+  function applyCountryPreset(preset: AnalysisCountryPresetCatalogItem) {
+    const nextCodes = countryCodesFromPreset(preset, countriesByCode);
+    if (nextCodes.length === 0) {
+      setError(text("该预设的国家当前不可用于分析。", "The countries in this preset are not currently available for analysis."));
+      return;
+    }
+    resetRunState();
+    setSelectedCountryCodes(nextCodes);
+  }
+
+  function toggleCountry(countryCode: string, checked: boolean) {
+    if (checked && !selectedCountryCodes.includes(countryCode) && selectedCountryCodes.length >= MAX_TARGET_COUNTRIES) {
+      setError(
+        text(
+          `目标国家最多选择 ${MAX_TARGET_COUNTRIES} 个。`,
+          `Select at most ${MAX_TARGET_COUNTRIES} target countries.`,
+        ),
+      );
+      return;
+    }
+    resetRunState();
+    setSelectedCountryCodes((current) => {
+      if (!checked) {
+        return current.filter((code) => code !== countryCode);
+      }
+      if (current.includes(countryCode)) {
+        return current;
+      }
+      return [...current, countryCode];
     });
   }
 
@@ -285,15 +386,23 @@ export function AnalysisRunWorkspace() {
       return;
     }
 
-    const invalidCountries = getInvalidCountryTokens(countryInput);
-    if (invalidCountries.length > 0) {
-      setError(`目标国家仅支持 2 或 3 位国家码：${invalidCountries.join(", ")}`);
+    if (!countryCatalogReady) {
+      setError(text("目标国家目录未加载，无法启动分析。", "Target country catalog is not loaded, so analysis cannot start."));
       return;
     }
 
-    const countries = parseCountries(countryInput);
-    if (countries.length === 0) {
-      setError("目标国家需填写 2 或 3 位国家码，例如 US、JP、GB。");
+    if (selectedCountryCodes.length === 0) {
+      setError(text("请至少选择一个目标国家。", "Select at least one target country."));
+      return;
+    }
+
+    if (selectedCountryCodes.length > MAX_TARGET_COUNTRIES) {
+      setError(
+        text(
+          `目标国家最多选择 ${MAX_TARGET_COUNTRIES} 个。`,
+          `Select at most ${MAX_TARGET_COUNTRIES} target countries.`,
+        ),
+      );
       return;
     }
 
@@ -315,7 +424,7 @@ export function AnalysisRunWorkspace() {
         {
           company_id: selectedCompanyId,
           product_ids: productIds,
-          target_countries: countries,
+          target_countries: selectedCountryCodes,
           competitor_limit: competitorLimit,
         },
         controller.signal,
@@ -395,7 +504,9 @@ export function AnalysisRunWorkspace() {
       <section className="grid gap-5">
         <Panel title="分析参数">
           {loading ? (
-            <LoadingState label="正在加载企业与产品" rows={4} />
+            <LoadingState label={text("正在加载企业、产品和目标国家目录", "Loading companies, products, and target country catalog")} rows={4} />
+          ) : error && companies.length === 0 ? (
+            <ErrorState message={error} />
           ) : companies.length === 0 ? (
             <EmptyState
               title="暂无企业"
@@ -410,16 +521,21 @@ export function AnalysisRunWorkspace() {
             <form className="grid gap-4" onSubmit={handleSubmit}>
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-river/20 bg-river/5 p-4">
                 <div>
-                  <p className="text-sm font-semibold text-ink">推荐演示配置</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-600">首个企业、前 3 个产品、US/JP/GB，适合 5 分钟现场演示。</p>
+                  <p className="text-sm font-semibold text-ink">{text("推荐演示配置", "Recommended demo settings")}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                    {text(
+                      `首个企业、前 3 个产品、${currentPresetName}，适合 5 分钟现场演示。`,
+                      `First company, first 3 products, and ${currentPresetName}; suitable for a 5-minute demo.`,
+                    )}
+                  </p>
                 </div>
                 <button
                   className="rounded-md border border-river/30 bg-white px-3 py-2 text-sm font-semibold text-river disabled:cursor-not-allowed disabled:bg-slate-100"
-                  disabled={productsLoading || submitting}
+                  disabled={productsLoading || submitting || !countryCatalogReady}
                   type="button"
                   onClick={() => void applyRecommendedDemoConfig()}
                 >
-                  使用推荐演示配置
+                  {text("使用推荐演示配置", "Use demo settings")}
                 </button>
               </div>
 
@@ -528,18 +644,80 @@ export function AnalysisRunWorkspace() {
                 </div>
               </div>
 
-              <label className="grid gap-2">
-                <span className="text-sm font-medium text-slate-700">选择目标国家</span>
-                <input
-                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-river focus:ring-2 focus:ring-river/20"
-                  placeholder={DEMO_COUNTRY_INPUT}
-                  value={countryInput}
-                  onChange={(event) => {
-                    resetRunState();
-                    setCountryInput(event.target.value);
-                  }}
-                />
-              </label>
+              <section className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink">{text("选择目标国家", "Choose target countries")}</h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      {text(
+                        "国家目录和预设来自后端市场目录接口，可按洲/区域快速组合。",
+                        "Countries and presets come from the backend market catalog and can be combined by region.",
+                      )}
+                    </p>
+                  </div>
+                  <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ${
+                    countrySelectionInvalid ? "bg-red-50 text-red-700 ring-red-200" : "bg-jade/10 text-jade ring-jade/20"
+                  }`}>
+                    {selectedCountryCount}/{MAX_TARGET_COUNTRIES}
+                  </span>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <MetricReadout
+                    label={text("已选国家", "Selected countries")}
+                    value={`${selectedCountryCount}/${MAX_TARGET_COUNTRIES}`}
+                  />
+                  <MetricReadout label={text("可选国家", "Available countries")} value={availableTargetCountries.length} />
+                  <MetricReadout label={text("当前预设", "Current preset")} value={currentPresetName} />
+                  <MetricReadout label={text("预计分析组合", "Analysis combinations")} value={analysisCombinationCount} />
+                </div>
+
+                {countryPresets.length > 0 ? (
+                  <div className="grid gap-2">
+                    <p className="text-xs font-semibold text-slate-500">{text("快捷预设", "Quick presets")}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {countryPresets.map((preset) => {
+                        const active = sameCountrySet(preset.country_codes, selectedCountryCodes);
+                        return (
+                          <button
+                            key={preset.preset_code}
+                            className={`rounded-md border px-3 py-2 text-left text-xs font-semibold transition ${
+                              active
+                                ? "border-river bg-river text-white"
+                                : "border-slate-200 bg-slate-50 text-slate-700 hover:border-river/40 hover:bg-river/5"
+                            }`}
+                            disabled={submitting || !countryCatalogReady}
+                            type="button"
+                            onClick={() => applyCountryPreset(preset)}
+                          >
+                            <span className="block">{presetDisplayName(preset, text)}</span>
+                            <span className={`mt-1 block font-medium ${active ? "text-white/80" : "text-slate-500"}`}>
+                              {preset.country_codes.length} {text("个国家", "countries")}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
+                {countryCatalogReady ? (
+                  <div className="grid gap-3">
+                    {countryGroups.map((group) => (
+                      <CountryGroupPanel
+                        key={group.key}
+                        group={group}
+                        maxSelected={MAX_TARGET_COUNTRIES}
+                        selectedCodes={selectedCountryCodes}
+                        text={text}
+                        onToggle={toggleCountry}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <ErrorState message={text("目标国家目录未加载，无法选择国家。", "Target country catalog is not loaded.")} />
+                )}
+              </section>
 
               <label className="grid gap-2">
                 <span className="text-sm font-medium text-slate-700">竞品采集上限</span>
@@ -556,12 +734,26 @@ export function AnalysisRunWorkspace() {
                 />
               </label>
 
+              <p className="rounded-lg border border-wheat/40 bg-wheat/10 p-3 text-sm font-medium leading-6 text-ink">
+                {text(
+                  "目标国家越多，数据采集和 AI 解释耗时越长；系统会自动优先使用缓存，必要时启用公开数据、CSV 或 AI fallback。",
+                  "More target countries take longer for data collection and AI explanation; the system prioritizes cache and uses public data, CSV, or AI fallback when needed.",
+                )}
+              </p>
+
               <button
                 className="rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
-                disabled={submitting || productsLoading || !selectedCompanyId || selectedProductIds.length === 0}
+                disabled={
+                  submitting ||
+                  productsLoading ||
+                  !selectedCompanyId ||
+                  selectedProductIds.length === 0 ||
+                  !countryCatalogReady ||
+                  countrySelectionInvalid
+                }
                 type="submit"
               >
-                {submitting ? "智能体分析中" : "开始智能体分析"}
+                {submitting ? text("智能体分析中", "Analyzing") : text("开始智能体分析", "Start agent analysis")}
               </button>
             </form>
           )}
@@ -572,7 +764,7 @@ export function AnalysisRunWorkspace() {
             <DetailItem label="分析 ID" value={analysisId ? `#${analysisId}` : "-"} />
             <DetailItem label="企业" value={selectedCompany?.name ?? "-"} />
             <DetailItem label="产品" value={selectedProductsLabel(selectedProducts)} />
-            <DetailItem label="目标国家" value={parseCountries(countryInput).join(", ") || "-"} />
+            <DetailItem label="目标国家" value={selectedCountryCodes.join(", ") || "-"} />
             <DetailItem label="整体状态" value={workflowStatusLabel(analysisStatus?.status ?? "waiting")} />
           </div>
           {notice ? (
@@ -691,6 +883,81 @@ function DetailItem({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-semibold text-slate-500">{label}</p>
       <p className="mt-1 truncate font-medium text-ink">{value}</p>
     </div>
+  );
+}
+
+function MetricReadout({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="min-h-[82px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+      <p className="text-xs font-semibold text-slate-500">{label}</p>
+      <p className="mt-2 truncate text-xl font-semibold text-ink">{value}</p>
+    </div>
+  );
+}
+
+function CountryGroupPanel({
+  group,
+  maxSelected,
+  selectedCodes,
+  text,
+  onToggle,
+}: {
+  group: CountryGroup;
+  maxSelected: number;
+  selectedCodes: string[];
+  text: TextFn;
+  onToggle: (countryCode: string, checked: boolean) => void;
+}) {
+  const selectedInGroup = group.items.filter((country) => selectedCodes.includes(country.country_code)).length;
+  return (
+    <section className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold text-ink">{text(group.labelZh, group.labelEn)}</h4>
+        <span className="text-xs font-semibold text-slate-500">
+          {selectedInGroup}/{group.items.length}
+        </span>
+      </div>
+      {group.items.length === 0 ? (
+        <p className="mt-3 text-xs text-slate-500">{text("暂无可选国家", "No available countries")}</p>
+      ) : (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {group.items.map((country) => {
+            const checked = selectedCodes.includes(country.country_code);
+            const disabled = !checked && selectedCodes.length >= maxSelected;
+            return (
+              <label
+                key={country.country_code}
+                className={`grid min-h-[72px] grid-cols-[auto_1fr] gap-3 rounded-md border px-3 py-2 text-sm transition ${
+                  checked
+                    ? "border-river/40 bg-white shadow-sm"
+                    : "border-slate-200 bg-white/70 hover:border-river/30 hover:bg-white"
+                } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+              >
+                <input
+                  checked={checked}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-river focus:ring-river"
+                  disabled={disabled}
+                  type="checkbox"
+                  onChange={(event) => onToggle(country.country_code, event.target.checked)}
+                />
+                <span className="min-w-0">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-ink">{countryDisplayName(country, text)}</span>
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold text-slate-500">
+                      {country.country_code}
+                    </span>
+                  </span>
+                  <span className="mt-1 block truncate text-xs text-slate-500">
+                    {countryRegionLabel(country, text)}
+                    {country.currency_code ? ` · ${country.currency_code}` : ""}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -975,9 +1242,37 @@ function selectedProductsLabel(products: Product[]): string {
     .join("、");
 }
 
-function parseCountries(value: string): string[] {
+function defaultCountryCodes(
+  countries: TargetCountryCatalogItem[],
+  presets: AnalysisCountryPresetCatalogItem[],
+): string[] {
+  const countryMap = new Map(availableCountries(countries).map((country) => [country.country_code, country]));
+  const defaultPreset = presets.find((preset) => preset.is_default) ?? presets[0] ?? null;
+  if (defaultPreset) {
+    const presetCodes = countryCodesFromPreset(defaultPreset, countryMap);
+    if (presetCodes.length > 0) {
+      return presetCodes;
+    }
+  }
+  return Array.from(countryMap.keys()).slice(0, MAX_TARGET_COUNTRIES);
+}
+
+function availableCountries(countries: TargetCountryCatalogItem[]): TargetCountryCatalogItem[] {
+  return countries.filter((country) => country.enabled && country.analysis_enabled);
+}
+
+function countryCodesFromPreset(
+  preset: AnalysisCountryPresetCatalogItem,
+  countriesByCode: Map<string, TargetCountryCatalogItem>,
+): string[] {
+  return normalizeCountryCodes(preset.country_codes)
+    .filter((countryCode) => countriesByCode.has(countryCode))
+    .slice(0, MAX_TARGET_COUNTRIES);
+}
+
+function normalizeCountryCodes(values: string[]): string[] {
   const seen = new Set<string>();
-  return countryTokens(value)
+  return values
     .map((country) => country.trim().toUpperCase())
     .filter((country) => /^[A-Z]{2,3}$/.test(country))
     .filter((country) => {
@@ -989,15 +1284,64 @@ function parseCountries(value: string): string[] {
     });
 }
 
-function getInvalidCountryTokens(value: string): string[] {
-  return countryTokens(value).filter((country) => !/^[A-Z]{2,3}$/.test(country.toUpperCase()));
+function sameCountrySet(left: string[], right: string[]): boolean {
+  const normalizedLeft = normalizeCountryCodes(left);
+  const normalizedRight = normalizeCountryCodes(right);
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return false;
+  }
+  const rightSet = new Set(normalizedRight);
+  return normalizedLeft.every((countryCode) => rightSet.has(countryCode));
 }
 
-function countryTokens(value: string): string[] {
-  return value
-    .split(/[,，\s]+/)
-    .map((country) => country.trim())
-    .filter(Boolean);
+function buildCountryGroups(countries: TargetCountryCatalogItem[]): CountryGroup[] {
+  const itemsByGroup = new Map<CountryGroupKey, TargetCountryCatalogItem[]>(
+    COUNTRY_GROUPS.map((group): [CountryGroupKey, TargetCountryCatalogItem[]] => [group.key, []]),
+  );
+  for (const country of countries) {
+    const groupKey = countryGroupKey(country);
+    if (groupKey) {
+      itemsByGroup.get(groupKey)?.push(country);
+    }
+  }
+  return COUNTRY_GROUPS.map((group) => ({
+    ...group,
+    items: itemsByGroup.get(group.key) ?? [],
+  }));
+}
+
+function countryGroupKey(country: TargetCountryCatalogItem): CountryGroupKey | null {
+  if (country.continent === "Asia") {
+    return "asia";
+  }
+  if (country.continent === "Europe") {
+    return "europe";
+  }
+  if (country.continent === "North America") {
+    return "north_america";
+  }
+  if (country.region_code === "LATAM" || country.continent === "South America") {
+    return "latam";
+  }
+  if (country.continent === "Oceania") {
+    return "oceania";
+  }
+  if (country.continent === "Africa") {
+    return "africa";
+  }
+  return null;
+}
+
+function presetDisplayName(preset: AnalysisCountryPresetCatalogItem, text: TextFn): string {
+  return text(preset.name_cn, preset.name_en ?? preset.name_cn);
+}
+
+function countryDisplayName(country: TargetCountryCatalogItem, text: TextFn): string {
+  return text(country.name_cn, country.name_en);
+}
+
+function countryRegionLabel(country: TargetCountryCatalogItem, text: TextFn): string {
+  return text(country.region_name_cn ?? country.region_code, country.region_name_en ?? country.region_code);
 }
 
 function isTerminalStatus(status: AnalysisWorkflowStatus): boolean {

@@ -432,6 +432,60 @@ export type AdminRequestOptions = {
   adminPassword?: string;
 };
 
+export type CatalogSource = "database" | "csv_fallback";
+
+export type TargetCountryCatalogItem = {
+  id: number | null;
+  country_code: string;
+  name_cn: string;
+  name_en: string;
+  region_code: string;
+  region_name_cn: string | null;
+  region_name_en: string | null;
+  continent: string | null;
+  currency_code: string | null;
+  languages: string[] | null;
+  default_sort_order: number;
+  enabled: boolean;
+  analysis_enabled: boolean;
+  disabled_reason: string | null;
+  provider_mappings: Record<string, unknown> | null;
+  fallback_enabled: boolean;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  source: CatalogSource;
+};
+
+export type TargetCountryCatalogResponse = {
+  items: TargetCountryCatalogItem[];
+  total: number;
+  source: CatalogSource;
+};
+
+export type AnalysisCountryPresetCatalogItem = {
+  id: number | null;
+  preset_code: string;
+  name_cn: string;
+  name_en: string | null;
+  description: string | null;
+  country_codes: string[];
+  industry_tags: string[] | null;
+  region_code: string | null;
+  is_default: boolean;
+  sort_order: number;
+  enabled: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  source: CatalogSource;
+};
+
+export type AnalysisCountryPresetCatalogResponse = {
+  items: AnalysisCountryPresetCatalogItem[];
+  total: number;
+  source: CatalogSource;
+};
+
 export type AnalysisWorkflowStatus =
   | "waiting"
   | "running"
@@ -981,6 +1035,20 @@ export async function testProvider(
   return requestJson<ProviderTestResponse>(`/api/admin/providers/test/${provider}${query}`, {
     method: "POST",
     headers: buildAdminHeaders(options),
+  });
+}
+
+export async function listTargetCountries(signal?: AbortSignal): Promise<TargetCountryCatalogResponse> {
+  return requestJson<TargetCountryCatalogResponse>("/api/markets/countries", {
+    cache: "no-store",
+    signal,
+  });
+}
+
+export async function listMarketPresets(signal?: AbortSignal): Promise<AnalysisCountryPresetCatalogResponse> {
+  return requestJson<AnalysisCountryPresetCatalogResponse>("/api/markets/presets", {
+    cache: "no-store",
+    signal,
   });
 }
 
