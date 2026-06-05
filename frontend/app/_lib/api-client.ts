@@ -24,6 +24,94 @@ export type CompanyListResponse = {
   total: number;
 };
 
+export type CompanyImageRole =
+  | "business_card"
+  | "catalog_cover"
+  | "brochure"
+  | "product_display"
+  | "factory_photo"
+  | "business_license"
+  | "other";
+
+export type CompanyIntakeEvidenceSource = "photo_text" | "photo_visual" | "manual_text" | "model_inference";
+export type CompanyDraftStatus = "draft" | "confirmed" | "rejected";
+export type CompanyIntakeAiResultType = "real_qwen" | "fallback" | "manual_required";
+export type CompanyPhotoNextAction = "review_draft" | "manual_review" | "manual_fill";
+
+export type CompanyIntakeEvidenceItem = {
+  field: string;
+  source: CompanyIntakeEvidenceSource;
+  image_index?: number | null;
+  image_role?: string | null;
+  value: string | null;
+};
+
+export type CompanyImportAsset = {
+  id: number;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  width: number | null;
+  height: number | null;
+  image_index: number;
+  image_role: string;
+  is_primary: boolean;
+  created_at: string;
+};
+
+export type CompanyDraftSummary = {
+  id: number;
+  status: CompanyDraftStatus | string;
+  company_name: string | null;
+  region: string | null;
+  industry: string | null;
+  target_countries: string[] | null;
+  confidence_score: string | null;
+  confirmed_company_id: number | null;
+  low_confidence: boolean;
+};
+
+export type CompanyDraft = CompanyDraftSummary & {
+  import_job_id: number;
+  credit_code_suffix: string | null;
+  main_products: string[] | null;
+  website: string | null;
+  description: string | null;
+  contact_role: string | null;
+  evidence: CompanyIntakeEvidenceItem[] | null;
+  risk_notes: string[] | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyDraftUpdateRequest = {
+  company_name?: string | null;
+  region?: string | null;
+  industry?: string | null;
+  main_products?: string[] | null;
+  target_countries?: string[] | null;
+  description?: string | null;
+  evidence?: CompanyIntakeEvidenceItem[] | null;
+  confidence_score?: string | null;
+};
+
+export type CompanyPhotoIntakeResponse = {
+  import_job_id: number;
+  draft_id: number;
+  job_status: string;
+  draft_status: string;
+  low_confidence: boolean;
+  ai_result_type: CompanyIntakeAiResultType;
+  ai_fallback_used: boolean;
+  model_used: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  next_action: CompanyPhotoNextAction;
+  asset: CompanyImportAsset;
+  assets: CompanyImportAsset[];
+  draft: CompanyDraftSummary;
+};
+
 export type Product = {
   id: number;
   company_id: number;
@@ -836,6 +924,68 @@ export async function updateCompany(companyId: number, payload: Partial<CompanyP
 
 export async function deleteCompany(companyId: number): Promise<void> {
   await requestVoid(`/api/companies/${companyId}`, { method: "DELETE" });
+}
+
+export async function uploadCompanyIntakePhotos(
+  payload: {
+    files: File[];
+    source_platform?: string | null;
+    image_roles: CompanyImageRole[];
+  },
+  signal?: AbortSignal,
+): Promise<CompanyPhotoIntakeResponse> {
+  const formData = new FormData();
+  formData.set("source_platform", payload.source_platform ?? "mobile");
+  payload.files.forEach((file) => {
+    formData.append("files[]", file);
+  });
+  payload.image_roles.forEach((role) => {
+    formData.append("image_roles[]", role);
+  });
+  return requestJson<CompanyPhotoIntakeResponse>("/api/company-intake/photo", {
+    method: "POST",
+    body: formData,
+    signal,
+  });
+}
+
+export async function getCompanyIntakeDraft(draftId: number, signal?: AbortSignal): Promise<CompanyDraft> {
+  return requestJson<CompanyDraft>(`/api/company-intake/drafts/${draftId}`, {
+    cache: "no-store",
+    signal,
+  });
+}
+
+export async function updateCompanyIntakeDraft(
+  draftId: number,
+  payload: CompanyDraftUpdateRequest,
+  signal?: AbortSignal,
+): Promise<CompanyDraft> {
+  return requestJson<CompanyDraft>(`/api/company-intake/drafts/${draftId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function confirmCompanyIntakeDraft(draftId: number, signal?: AbortSignal): Promise<Company> {
+  return requestJson<Company>(`/api/company-intake/drafts/${draftId}/confirm`, {
+    method: "POST",
+    body: JSON.stringify({}),
+    signal,
+  });
+}
+
+export async function rejectCompanyIntakeDraft(
+  draftId: number,
+  payload: { reason?: string | null },
+  signal?: AbortSignal,
+): Promise<CompanyDraft> {
+  return requestJson<CompanyDraft>(`/api/company-intake/drafts/${draftId}/reject`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
 }
 
 export async function listProducts(companyId?: number): Promise<ProductListResponse> {

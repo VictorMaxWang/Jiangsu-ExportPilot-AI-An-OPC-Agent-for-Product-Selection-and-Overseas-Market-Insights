@@ -1,8 +1,10 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../../_components/EmptyState";
 import { ErrorState } from "../../_components/ErrorState";
+import { useI18n } from "../../_components/LanguageProvider";
 import { LoadingState } from "../../_components/LoadingState";
 import {
   Company,
@@ -30,7 +32,13 @@ const emptyForm: CompanyFormState = {
   target_countries: "",
 };
 
-export function CompaniesWorkspace() {
+type CompaniesWorkspaceProps = {
+  initialCompanyId?: number | null;
+  intakeConfirmed?: boolean;
+};
+
+export function CompaniesWorkspace({ initialCompanyId = null, intakeConfirmed = false }: CompaniesWorkspaceProps) {
+  const { text } = useI18n();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -45,17 +53,16 @@ export function CompaniesWorkspace() {
     [companies, selectedId],
   );
 
-  useEffect(() => {
-    void refreshCompanies();
-  }, []);
-
-  async function refreshCompanies() {
+  const refreshCompanies = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const response = await listCompanies();
       setCompanies(response.items);
       setSelectedId((current) => {
+        if (initialCompanyId && response.items.some((company) => company.id === initialCompanyId)) {
+          return initialCompanyId;
+        }
         if (current && response.items.some((company) => company.id === current)) {
           return current;
         }
@@ -66,7 +73,11 @@ export function CompaniesWorkspace() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [initialCompanyId]);
+
+  useEffect(() => {
+    void refreshCompanies();
+  }, [refreshCompanies]);
 
   function startCreate() {
     setEditingId(null);
@@ -138,7 +149,37 @@ export function CompaniesWorkspace() {
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+    <>
+      <div className="mb-5 flex flex-col gap-3 rounded-lg border border-river/20 bg-river/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-ink">
+            {text("用照片/截图快速生成企业草稿", "Create a company draft from photos or screenshots")}
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            {text(
+              "适合拍摄名片、宣传册、产品目录封面或营业执照局部信息，确认前不会写入正式企业库。",
+              "Use business cards, brochures, catalog covers, or partial license information. Nothing is saved to the company catalog until confirmation.",
+            )}
+          </p>
+        </div>
+        <Link
+          className="inline-flex w-fit rounded-md bg-river px-4 py-2.5 text-sm font-semibold text-white shadow-sm"
+          href="/companies/import"
+        >
+          {text("拍照新增企业", "Add company by photo")}
+        </Link>
+      </div>
+
+      {intakeConfirmed ? (
+        <div className="mb-5 flex flex-col gap-3 rounded-lg border border-jade/30 bg-jade/10 p-4 text-sm text-jade sm:flex-row sm:items-center sm:justify-between">
+          <span className="font-semibold">{text("企业已确认入库，可继续新增产品或启动智能体分析。", "Company confirmed. Add products or start agent analysis.")}</span>
+          <Link className="w-fit rounded-md bg-jade px-3 py-2 text-sm font-semibold text-white" href="/products/import">
+            {text("继续导入产品", "Import products")}
+          </Link>
+        </div>
+      ) : null}
+
+      <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
       <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-ink">{editingId ? "编辑企业" : "新增企业"}</h2>
@@ -235,7 +276,8 @@ export function CompaniesWorkspace() {
           </div>
         ) : null}
       </section>
-    </div>
+      </div>
+    </>
   );
 }
 
