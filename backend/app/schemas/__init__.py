@@ -38,9 +38,12 @@ from app.schemas.ai import (
 )
 from app.schemas.chat import (
     ChatMessageCreate,
+    ChatMessageListResponse,
     ChatMessageRead,
+    ChatMessageSendResponse,
     ChatRole,
     ChatSessionCreate,
+    ChatSessionListResponse,
     ChatSessionRead,
 )
 from app.schemas.companies import (
@@ -255,9 +258,12 @@ __all__ = [
     "ApiCallLogListResponse",
     "ApiCallStatus",
     "ChatMessageCreate",
+    "ChatMessageListResponse",
     "ChatMessageRead",
+    "ChatMessageSendResponse",
     "ChatRole",
     "ChatSessionCreate",
+    "ChatSessionListResponse",
     "ChatSessionRead",
     "CompanyCreate",
     "CompanyDraftConfirmRequest",
