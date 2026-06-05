@@ -82,6 +82,7 @@ export type CsvImportResult = {
 };
 
 export type ProductIntakeSourcePlatform = "taobao" | "tmall" | "pinduoduo" | "jd" | "unknown";
+export type ProductImageRole = "main" | "spec" | "detail" | "package" | "other";
 export type ProductIntakeEvidenceSource =
   | "screenshot_text"
   | "screenshot_visual"
@@ -142,6 +143,8 @@ export type ProductDraftSellingPoints = {
 export type ProductIntakeEvidenceItem = {
   field: string;
   source: ProductIntakeEvidenceSource;
+  image_index?: number | null;
+  image_role?: string | null;
   value: string | null;
 };
 
@@ -152,6 +155,9 @@ export type ProductImportAsset = {
   file_size: number;
   width: number | null;
   height: number | null;
+  image_index: number;
+  image_role: string;
+  is_primary: boolean;
   created_at: string;
 };
 
@@ -176,6 +182,8 @@ export type ProductDraftSummary = {
   category: string | null;
   price_cny: string | null;
   confidence_score: string | null;
+  image_count: number;
+  primary_image_asset_id: number | null;
   confirmed_product_id: number | null;
   low_confidence: boolean;
 };
@@ -193,6 +201,7 @@ export type ProductDraft = ProductDraftSummary & {
   target_users: string[] | null;
   source_platform: string | null;
   evidence: ProductIntakeEvidenceItem[] | null;
+  multi_image_summary: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };
@@ -252,6 +261,10 @@ export type ProductScreenshotIntakeResponse = {
   next_action: ProductScreenshotNextAction;
   asset: ProductImportAsset;
   draft: ProductDraftSummary;
+};
+
+export type ProductScreenshotsIntakeResponse = ProductScreenshotIntakeResponse & {
+  assets: ProductImportAsset[];
 };
 
 export type ProductUrlIntakeResponse = {
@@ -813,6 +826,31 @@ export async function uploadProductIntakeScreenshot(
   formData.set("source_platform", payload.source_platform ?? "unknown");
   formData.set("file", payload.file);
   return requestJson<ProductScreenshotIntakeResponse>("/api/product-intake/screenshot", {
+    method: "POST",
+    body: formData,
+    signal,
+  });
+}
+
+export async function uploadProductIntakeScreenshots(
+  payload: {
+    company_id: number;
+    files: File[];
+    source_platform: ProductIntakeSourcePlatform;
+    image_roles: ProductImageRole[];
+  },
+  signal?: AbortSignal,
+): Promise<ProductScreenshotsIntakeResponse> {
+  const formData = new FormData();
+  formData.set("company_id", String(payload.company_id));
+  formData.set("source_platform", payload.source_platform ?? "unknown");
+  payload.files.forEach((file) => {
+    formData.append("files[]", file);
+  });
+  payload.image_roles.forEach((role) => {
+    formData.append("image_roles[]", role);
+  });
+  return requestJson<ProductScreenshotsIntakeResponse>("/api/product-intake/screenshots", {
     method: "POST",
     body: formData,
     signal,
