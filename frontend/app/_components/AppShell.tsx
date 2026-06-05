@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { Suspense, useState } from "react";
 import { navigationItems, utilityNavigationItems } from "../_lib/navigation";
+import { FloatingChatWidget } from "./FloatingChatWidget";
 import { LanguageToggle } from "./LanguageToggle";
 import { useI18n } from "./LanguageProvider";
 
@@ -14,6 +16,7 @@ type AppShellProps = {
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const { text } = useI18n();
+  const [chatOpen, setChatOpen] = useState(false);
 
   return (
     <div className="min-h-screen">
@@ -81,7 +84,16 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>
+      <main
+        className={`mx-auto w-full max-w-7xl px-4 py-8 transition-[padding] duration-200 sm:px-6 lg:px-8 ${
+          chatOpen ? "lg:pr-[28rem]" : ""
+        }`}
+      >
+        {children}
+      </main>
+      <Suspense fallback={null}>
+        <FloatingChatWidget onOpenChange={setChatOpen} />
+      </Suspense>
     </div>
   );
 }

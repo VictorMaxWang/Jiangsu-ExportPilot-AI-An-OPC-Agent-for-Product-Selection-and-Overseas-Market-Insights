@@ -240,6 +240,75 @@ export type AiChatResponse = {
   usage: Record<string, unknown> | null;
 };
 
+export type ChatRole = "user" | "assistant" | "system";
+
+export type ChatContextIds = {
+  company_id?: number;
+  product_id?: number;
+  analysis_id?: number;
+  report_id?: number;
+};
+
+export type ChatPageContext = {
+  page: string;
+  pathname_group: string;
+  locale: "zh-CN" | "en";
+  assistant_role: string;
+  assistant_role_label: string;
+  context_ids: ChatContextIds;
+};
+
+export type ChatSessionCreateRequest = ChatContextIds & {
+  title?: string | null;
+  current_page?: string | null;
+  context_refs?: Record<string, unknown> | null;
+  page_context?: ChatPageContext | null;
+};
+
+export type ChatSession = ChatContextIds & {
+  id: number;
+  title: string | null;
+  current_page: string | null;
+  context_refs: Record<string, unknown> | null;
+  page_context: Record<string, unknown> | null;
+  safety_status: string;
+  status: string;
+  last_message_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatMessageCreateRequest = ChatContextIds & {
+  role: "user";
+  content: string;
+  context_refs?: Record<string, unknown> | null;
+  current_page?: string | null;
+  page_context?: ChatPageContext | null;
+};
+
+export type ChatMessage = {
+  id: number;
+  session_id: number;
+  role: ChatRole;
+  content: string;
+  content_redacted: boolean;
+  context_refs: Record<string, unknown> | null;
+  safety_status: string;
+  model_used: string | null;
+  token_count: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  report_edit_proposal_id: number | null;
+  created_at: string;
+};
+
+export type ChatSendResponse = {
+  session: ChatSession;
+  user_message: ChatMessage;
+  assistant_message: ChatMessage;
+  proposal: Record<string, unknown> | null;
+};
+
 export type ProductDraftSellingPoints = {
   selling_points_cn?: string[];
   selling_points_en?: string[];
@@ -1315,6 +1384,29 @@ export async function getDashboard(
 
 export async function chatWithAi(payload: AiChatRequest, signal?: AbortSignal): Promise<AiChatResponse> {
   return requestJson<AiChatResponse>("/api/ai/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function createChatSession(
+  payload: ChatSessionCreateRequest,
+  signal?: AbortSignal,
+): Promise<ChatSession> {
+  return requestJson<ChatSession>("/api/chat/sessions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function sendChatMessage(
+  sessionId: number,
+  payload: ChatMessageCreateRequest,
+  signal?: AbortSignal,
+): Promise<ChatSendResponse> {
+  return requestJson<ChatSendResponse>(`/api/chat/sessions/${sessionId}/messages`, {
     method: "POST",
     body: JSON.stringify(payload),
     signal,
