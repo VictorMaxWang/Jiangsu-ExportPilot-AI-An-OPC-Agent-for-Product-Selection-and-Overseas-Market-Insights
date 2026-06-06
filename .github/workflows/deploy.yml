@@ -20,21 +20,6 @@ jobs:
     timeout-minutes: 20
     env:
       APP_ENV: test
-      DASHSCOPE_API_KEY: ""
-      BAILIAN_API_KEY: ""
-      YOUTUBE_DATA_API_KEY: ""
-      ETSY_KEYSTRING: ""
-      ETSY_SHARED_SECRET: ""
-      UN_COMTRADE_API_KEY: ""
-      EBAY_CLIENT_ID: ""
-      EBAY_CLIENT_SECRET: ""
-      RAKUTEN_APP_ID: ""
-      RAKUTEN_APPLICATION_ID: ""
-      REDDIT_CLIENT_ID: ""
-      REDDIT_CLIENT_SECRET: ""
-      ENABLE_YOUTUBE: "true"
-      ENABLE_ETSY: "true"
-      ENABLE_UN_COMTRADE: "true"
 
     steps:
       - name: Checkout
