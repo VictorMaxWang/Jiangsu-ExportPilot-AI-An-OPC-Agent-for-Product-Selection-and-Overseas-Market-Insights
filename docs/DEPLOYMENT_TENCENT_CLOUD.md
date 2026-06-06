@@ -319,7 +319,7 @@ docker compose --project-name supinzhihang_prod --env-file .env -f docker-compos
 
 ## 9.2 GitHub Actions 自动部署
 
-推荐的自动部署方式是：GitHub Actions 在 `main` 分支 push 后通过 SSH 登录 CVM，在 `/opt/supinzhihang` 中拉取最新代码并运行生产部署脚本。
+推荐的自动部署方式是：GitHub Actions 在 `main` 分支 push 后通过 GitHub-hosted runner 远程 SSH 登录 CVM，在 `/opt/supinzhihang` 中重置到 `origin/main` 并运行生产部署脚本。当前仓库使用 `.github/workflows/deploy.yml`，支持 `push main` 自动触发和 `workflow_dispatch` 手动触发，不使用 self-hosted runner。
 
 服务器侧准备：
 
@@ -330,51 +330,36 @@ test -f .env
 bash scripts/deploy_prod.sh
 ```
 
-GitHub 仓库只保存 Action 所需的 Secret 名称，不在仓库写真实值。建议 Secret：
+GitHub 仓库只保存 Action 所需的 Secret 名称，不在仓库写真实值。必需 Repository Secrets：
 
 ```text
-TENCENT_CVM_HOST
-TENCENT_CVM_USER
-TENCENT_CVM_SSH_KEY
-TENCENT_CVM_PORT
-TENCENT_CVM_DEPLOY_PATH
+TENCENT_HOST
+TENCENT_PORT
+TENCENT_USER
+TENCENT_SSH_KEY
 ```
 
-工作流示例：
+部署 job 远程执行的核心命令：
 
-```yaml
-name: deploy-production
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy on Tencent Cloud CVM
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.TENCENT_CVM_HOST }}
-          username: ${{ secrets.TENCENT_CVM_USER }}
-          key: ${{ secrets.TENCENT_CVM_SSH_KEY }}
-          port: ${{ secrets.TENCENT_CVM_PORT }}
-          script: |
-            set -Eeuo pipefail
-            cd "${{ secrets.TENCENT_CVM_DEPLOY_PATH }}"
-            git fetch origin main
-            git checkout main
-            git pull --ff-only origin main
-            bash scripts/deploy_prod.sh
+```bash
+cd /opt/supinzhihang
+git fetch origin
+git reset --hard origin/main
+sed -i 's/\r$//' scripts/*.sh
+chmod +x scripts/*.sh
+SKIP_BACKUP_BEFORE_MIGRATION=1 bash scripts/deploy_prod.sh
+curl http://127.0.0.1:8000/health
+curl -I https://opc.ankangyu.cn
+curl -sS -X POST https://opc.ankangyu.cn/api/ai/smoke/text -H 'Content-Type: application/json' -d '{}'
 ```
 
 安全要求：
 
 - 不要把 `.env` 放进 GitHub Actions artifact、日志或缓存。
 - 不要在 workflow 中 `echo` Secret。
+- 不要在 workflow 或排错记录中输出 API Key、Cookie、管理密码、Authorization header 或数据库连接串。
 - 如果部署失败，只粘贴失败阶段、退出码和非敏感日志摘要。
-- 生产升级前由 `scripts/deploy_prod.sh` 自动备份数据库；如跳过备份，必须在状态记录中说明原因。
+- 本自动部署按比赛演示要求设置 `SKIP_BACKUP_BEFORE_MIGRATION=1`，不会修改服务器 `.env`。
 
 ## 10. 查看日志
 
