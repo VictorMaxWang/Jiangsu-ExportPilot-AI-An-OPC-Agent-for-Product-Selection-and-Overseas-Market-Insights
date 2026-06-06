@@ -107,7 +107,14 @@ jobs:
             fi
           done
 
-          printf '%s\n' "$TENCENT_SSH_KEY" | tr -d '\r' > "$key_file"
+          python3 - <<'PY' > "$key_file"
+          import os
+
+          key = os.environ["TENCENT_SSH_KEY"].replace("\\n", "\n").replace("\r", "")
+          if not key.endswith("\n"):
+              key += "\n"
+          print(key, end="")
+          PY
           chmod 600 "$key_file"
 
           ssh-keyscan -p "$TENCENT_PORT" "$TENCENT_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null

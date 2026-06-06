@@ -3,7 +3,7 @@
 - Task id: S02
 - Owner thread: Codex GitHub Actions auto deploy implementation thread
 - Start time: 2026-06-06 19:40:05 +08:00
-- End time: 2026-06-06 20:10:24 +08:00
+- End time: 2026-06-06 20:15:08 +08:00
 - Production target: `https://opc.ankangyu.cn`
 - Production path: `/opt/supinzhihang`
 
@@ -92,6 +92,8 @@ Do not store `.env`, API keys, cookies, admin passwords, Authorization values, o
 - The existing `.github/workflows/ci.yml` push run for the same commit also reported a workflow-file issue before jobs were created. This appears to be an existing CI workflow problem and was not changed in S02.
 - Follow-up commit `da2c15b` triggered `Deploy Production` run `27061799204`; the workflow created jobs, frontend checks passed, backend tests failed because job-level empty key/provider env vars overrode test fake settings, and deploy was skipped by `needs`.
 - The deploy workflow was updated again to avoid injecting third-party key or provider toggle env vars into backend tests.
+- Follow-up commit `4cc2e88` triggered `Deploy Production` run `27061956283`; backend tests and frontend checks passed, then the SSH deploy step failed while loading the temporary private key with `error in libcrypto` before server commands ran.
+- The deploy workflow was updated to normalize both real newlines and literal `\n` sequences from `TENCENT_SSH_KEY` into the temporary key file without printing key material.
 
 ## Blockers
 
