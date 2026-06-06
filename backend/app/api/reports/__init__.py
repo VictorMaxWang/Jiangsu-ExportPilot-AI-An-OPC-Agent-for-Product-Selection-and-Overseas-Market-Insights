@@ -1,17 +1,25 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.ai import get_bailian_client
 from app.db import get_db
 from app.schemas import (
+    ReportEditProposalRead,
     ReportGenerateRequest,
     ReportListResponse,
+    ReportProposalConfirmResponse,
+    ReportProposalDecisionRequest,
     ReportRead,
+    ReportVersionListResponse,
+    ReportVersionRead,
+    ReportVersionRestoreRequest,
+    ReportVersionRestoreResponse,
 )
 from app.services import report_service
+from app.services.report_service import ReportVersioningError
 from app.services.ai import BailianClient
 from app.services.reports import ReportGenerationInputError, ReportGenerator
 
@@ -67,6 +75,75 @@ def get_report(report_id: int, db: Session = Depends(get_db)) -> ReportRead:
     return report
 
 
+@router.get("/{report_id}/versions", response_model=ReportVersionListResponse)
+def list_report_versions(report_id: int, db: Session = Depends(get_db)) -> ReportVersionListResponse:
+    report = report_service.get_report(db, report_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    versions = report_service.list_report_versions(db, report_id)
+    return ReportVersionListResponse(
+        items=[ReportVersionRead.model_validate(version) for version in versions],
+        total=len(versions),
+        current_version_id=report.current_version_id,
+    )
+
+
+@router.post("/proposals/{proposal_id}/confirm", response_model=ReportProposalConfirmResponse)
+def confirm_report_edit_proposal(
+    proposal_id: int,
+    payload: ReportProposalDecisionRequest = Body(default_factory=ReportProposalDecisionRequest),
+    db: Session = Depends(get_db),
+) -> ReportProposalConfirmResponse:
+    try:
+        report, version, proposal = report_service.confirm_report_edit_proposal(
+            db,
+            proposal_id,
+            decision_note=payload.reason,
+        )
+    except ReportVersioningError as exc:
+        raise _versioning_exception(exc) from exc
+    return ReportProposalConfirmResponse(
+        report=ReportRead.model_validate(report),
+        version=ReportVersionRead.model_validate(version),
+        proposal=ReportEditProposalRead.model_validate(proposal),
+    )
+
+
+@router.post("/proposals/{proposal_id}/reject", response_model=ReportEditProposalRead)
+def reject_report_edit_proposal(
+    proposal_id: int,
+    payload: ReportProposalDecisionRequest = Body(default_factory=ReportProposalDecisionRequest),
+    db: Session = Depends(get_db),
+) -> ReportEditProposalRead:
+    try:
+        proposal = report_service.reject_report_edit_proposal(db, proposal_id, decision_note=payload.reason)
+    except ReportVersioningError as exc:
+        raise _versioning_exception(exc) from exc
+    return ReportEditProposalRead.model_validate(proposal)
+
+
+@router.post("/{report_id}/versions/{version_id}/restore", response_model=ReportVersionRestoreResponse)
+def restore_report_version(
+    report_id: int,
+    version_id: int,
+    payload: ReportVersionRestoreRequest = Body(default_factory=ReportVersionRestoreRequest),
+    db: Session = Depends(get_db),
+) -> ReportVersionRestoreResponse:
+    try:
+        report, version = report_service.restore_report_version(
+            db,
+            report_id,
+            version_id,
+            decision_note=payload.reason,
+        )
+    except ReportVersioningError as exc:
+        raise _versioning_exception(exc) from exc
+    return ReportVersionRestoreResponse(
+        report=ReportRead.model_validate(report),
+        version=ReportVersionRead.model_validate(version),
+    )
+
+
 @router.get("/{report_id}/download")
 def download_report(
     report_id: int,
@@ -100,3 +177,16 @@ def _input_exception(exc: ReportGenerationInputError) -> HTTPException:
     if exc.code in {"ANALYSIS_NOT_FOUND", "COMPANY_NOT_FOUND"}:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": exc.code, "message": str(exc)})
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": exc.code, "message": str(exc)})
+
+
+def _versioning_exception(exc: ReportVersioningError) -> HTTPException:
+    if exc.code in {"REPORT_NOT_FOUND", "REPORT_VERSION_NOT_FOUND", "REPORT_PROPOSAL_NOT_FOUND"}:
+        code = status.HTTP_404_NOT_FOUND
+    elif exc.code in {"REPORT_PROPOSAL_STALE", "REPORT_VERSION_ALREADY_CURRENT"}:
+        code = status.HTTP_409_CONFLICT
+    else:
+        code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    detail: dict[str, object] = {"code": exc.code, "message": str(exc)}
+    if exc.quality is not None:
+        detail["quality"] = exc.quality
+    return HTTPException(status_code=code, detail=detail)

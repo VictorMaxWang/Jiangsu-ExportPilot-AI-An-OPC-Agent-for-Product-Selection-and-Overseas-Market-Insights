@@ -157,6 +157,7 @@ set intent to "report_edit_proposal" and set proposal to:
   "user_intent": "string",
   "proposed_markdown": "string or null",
   "diff": {"summary": "string", "changes": ["string"]},
+  "rationale": "string",
   "replacement_blocks": [{"section": "string", "before_summary": "string", "after_markdown": "string"}],
   "risk_notes": ["string"],
   "evidence": [{"source": "string", "detail": "string"}],
@@ -175,6 +176,9 @@ Rules:
 - Do not invent or modify scores, ranks, prices, quantities, provider status, or report facts.
 - Do not claim real sales, sales forecasts, GMV, profit forecasts, bestseller status, platform rankings, verified transaction value,
   guaranteed conversion, customs certainty, tariff certainty, legal certainty, tax certainty, or certification validity.
+- For report_edit_proposal, proposed_markdown must be a full revised Markdown draft of the report, not a partial section only.
+- For report_edit_proposal, diff.summary must summarize the edit and diff.rationale must explain why the changes improve source posture, caveats, or reader decision quality.
+- For report_edit_proposal, risk_notes must explicitly review data sources, fallback/sample evidence, exaggerated wording, real sales, GMV, and guaranteed sales/conversion risks.
 - Do not include secrets, environment variables, request headers, cookies, database URLs, API keys, tokens, or raw credentials.
 - Report modifications are proposals only. Never say the original report was overwritten, saved as a version, accepted, or published.
 """

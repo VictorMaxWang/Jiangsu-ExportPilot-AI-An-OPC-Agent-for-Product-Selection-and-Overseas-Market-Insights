@@ -126,7 +126,11 @@ def test_report_edit_message_creates_proposal_without_overwriting_report(
                 "proposal": {
                     "user_intent": "Strengthen the risk section.",
                     "proposed_markdown": proposed_markdown,
-                    "diff": {"summary": "Strengthen risk caveat", "changes": ["Add certification review caveat"]},
+                    "diff": {
+                        "summary": "Strengthen risk caveat",
+                        "rationale": "The risk section needs clearer source and certification caveats.",
+                        "changes": ["Add certification review caveat"],
+                    },
                     "replacement_blocks": [
                         {
                             "section": "Risk",
@@ -162,6 +166,11 @@ def test_report_edit_message_creates_proposal_without_overwriting_report(
     assert payload["proposal"] is not None
     assert payload["proposal"]["status"] == "draft"
     assert payload["proposal"]["proposed_markdown"] == proposed_markdown
+    assert "修改摘要" in payload["assistant_message"]["content"]
+    assert "修改后的 Markdown 草稿" in payload["assistant_message"]["content"]
+    assert "修改理由" in payload["assistant_message"]["content"]
+    assert payload["proposal"]["diff"]["rationale"] == "The risk section needs clearer source and certification caveats."
+    assert payload["proposal"]["diff"]["quality"]["status"] == "blocked"
     assert payload["assistant_message"]["report_edit_proposal_id"] == payload["proposal"]["id"]
 
     with session_factory() as db:
@@ -174,6 +183,123 @@ def test_report_edit_message_creates_proposal_without_overwriting_report(
         assert proposal is not None
         assert proposal.target_version_id == original_version_id
         assert proposal.proposed_html and "<article" in proposal.proposed_html
+
+
+def test_confirm_report_edit_proposal_creates_new_current_version(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_with_session
+    graph = _seed_chat_graph(session_factory)
+    proposal_id = _seed_report_proposal(session_factory, graph, proposed_markdown=_quality_pass_markdown())
+
+    response = client.post(
+        f"/api/reports/proposals/{proposal_id}/confirm",
+        json={"reason": "User approved the revised report."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["version"]["version_number"] == 2
+    assert payload["version"]["source_type"] == "proposal"
+    assert payload["version"]["source_proposal_id"] == proposal_id
+    assert payload["proposal"]["status"] == "accepted"
+    assert payload["proposal"]["accepted_version_id"] == payload["version"]["id"]
+    assert payload["report"]["current_version_id"] == payload["version"]["id"]
+
+    version_list = client.get(f"/api/reports/{graph['report_id']}/versions")
+    assert version_list.status_code == 200
+    version_payload = version_list.json()
+    assert version_payload["current_version_id"] == payload["version"]["id"]
+    assert version_payload["total"] == 2
+    assert [item["version_number"] for item in version_payload["items"]] == [2, 1]
+
+    with session_factory() as db:
+        report = db.get(Report, graph["report_id"])
+        assert report is not None
+        assert report.current_version_id == payload["version"]["id"]
+        assert report.content_markdown == _quality_pass_markdown()
+        versions = list(db.scalars(select(ReportVersion).where(ReportVersion.report_id == report.id)))
+        assert len(versions) == 2
+
+
+def test_reject_report_edit_proposal_does_not_create_version(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_with_session
+    graph = _seed_chat_graph(session_factory)
+    proposal_id = _seed_report_proposal(session_factory, graph, proposed_markdown=_quality_pass_markdown())
+    with session_factory() as db:
+        original_report = db.get(Report, graph["report_id"])
+        assert original_report is not None
+        original_version_id = original_report.current_version_id
+        original_markdown = original_report.content_markdown
+
+    response = client.post(
+        f"/api/reports/proposals/{proposal_id}/reject",
+        json={"reason": "Keep the original report."},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+    with session_factory() as db:
+        report = db.get(Report, graph["report_id"])
+        assert report is not None
+        assert report.current_version_id == original_version_id
+        assert report.content_markdown == original_markdown
+        assert db.scalar(select(func.count()).select_from(ReportVersion).where(ReportVersion.report_id == report.id)) == 1
+
+
+def test_restore_old_report_version_creates_append_only_version(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_with_session
+    graph = _seed_chat_graph(session_factory)
+    with session_factory() as db:
+        report = db.get(Report, graph["report_id"])
+        assert report is not None
+        version1_id = report.current_version_id
+        original_markdown = report.content_markdown
+    proposal_id = _seed_report_proposal(session_factory, graph, proposed_markdown=_quality_pass_markdown())
+    confirm = client.post(f"/api/reports/proposals/{proposal_id}/confirm", json={})
+    assert confirm.status_code == 200
+
+    response = client.post(
+        f"/api/reports/{graph['report_id']}/versions/{version1_id}/restore",
+        json={"reason": "Restore the original wording."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["version"]["version_number"] == 3
+    assert payload["version"]["source_type"] == "restore"
+    assert payload["version"]["content_markdown"] == original_markdown
+    assert payload["report"]["current_version_id"] == payload["version"]["id"]
+    with session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ReportVersion).where(ReportVersion.report_id == graph["report_id"])) == 3
+
+
+def test_confirm_report_edit_proposal_blocks_unsafe_quality(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_with_session
+    graph = _seed_chat_graph(session_factory)
+    unsafe_markdown = "# Q51 Report\n\n## Recommendation\nThis report proves GMV and guaranteed sales for launch."
+    proposal_id = _seed_report_proposal(session_factory, graph, proposed_markdown=unsafe_markdown)
+
+    response = client.post(f"/api/reports/proposals/{proposal_id}/confirm", json={})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "REPORT_QUALITY_BLOCKED"
+    assert detail["quality"]["status"] == "blocked"
+    with session_factory() as db:
+        report = db.get(Report, graph["report_id"])
+        assert report is not None
+        assert db.scalar(select(func.count()).select_from(ReportVersion).where(ReportVersion.report_id == report.id)) == 1
+        proposal = db.get(ReportEditProposal, proposal_id)
+        assert proposal is not None
+        assert proposal.status == "draft"
+        assert proposal.diff["quality"]["status"] == "blocked"
 
 
 def test_chat_context_missing_and_mismatched_ids_return_safe_errors(
@@ -426,6 +552,44 @@ def _seed_chat_graph(session_factory: sessionmaker[Session], *, report_suffix: s
             "analysis_id": analysis.id,
             "report_id": report.id,
         }
+
+
+def _seed_report_proposal(
+    session_factory: sessionmaker[Session],
+    graph: dict[str, int],
+    *,
+    proposed_markdown: str,
+) -> int:
+    with session_factory() as db:
+        report = db.get(Report, graph["report_id"])
+        assert report is not None
+        proposal = ReportEditProposal(
+            report_id=report.id,
+            target_version_id=report.current_version_id,
+            user_intent="Apply a revised report draft.",
+            proposed_markdown=proposed_markdown,
+            diff={"summary": "Apply revised report draft", "rationale": "Improve source posture and caveats."},
+            risk_notes=["Human review required before accepting."],
+            evidence=[{"source": "report", "detail": "current report draft"}],
+            confidence_score=Decimal("0.8200"),
+            status="draft",
+        )
+        db.add(proposal)
+        db.commit()
+        return proposal.id
+
+
+def _quality_pass_markdown() -> str:
+    return (
+        "# Q51 Report\n\n"
+        "## Data sources\n"
+        "Sources: World Bank API, Etsy CSV fallback, and structured analysis evidence. "
+        "CSV fallback and sample data are directional only and do not represent real sales.\n\n"
+        "## Recommendation\n"
+        "Use the US as a cautious listing test market, with human review before publishing.\n\n"
+        "## Risk notes\n"
+        "The report avoids GMV forecasts, guaranteed sales, and guaranteed conversion claims."
+    )
 
 
 def _seed_other_product(session_factory: sessionmaker[Session]) -> int:

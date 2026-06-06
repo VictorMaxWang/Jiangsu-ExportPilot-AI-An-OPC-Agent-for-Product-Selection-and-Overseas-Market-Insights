@@ -2,7 +2,16 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { ApiError, ChatMessage, ChatSession, createChatSession, sendChatMessage } from "../_lib/api-client";
+import {
+  ApiError,
+  ChatMessage,
+  ChatSession,
+  ReportEditProposal,
+  applyReportEditProposal,
+  createChatSession,
+  rejectReportEditProposal,
+  sendChatMessage,
+} from "../_lib/api-client";
 import {
   ChatAssistantRole,
   buildChatPageContext,
@@ -21,7 +30,10 @@ type WidgetMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  proposal?: ReportEditProposal | null;
 };
+
+type TextFn = (zh: string, en?: string) => string;
 
 type FailedRequest = {
   content: string;
@@ -47,6 +59,7 @@ const quickPrompts = [
 ];
 
 const initialRole: ChatAssistantRole = "general_assistant";
+const REPORT_VERSION_UPDATED_EVENT = "report-version-updated";
 
 export function FloatingChatWidget({ onOpenChange }: FloatingChatWidgetProps) {
   const pathname = usePathname();
@@ -58,6 +71,7 @@ export function FloatingChatWidget({ onOpenChange }: FloatingChatWidgetProps) {
   const [messages, setMessages] = useState<WidgetMessage[]>([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [proposalActionId, setProposalActionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failedRequest, setFailedRequest] = useState<FailedRequest | null>(null);
   const launcherRef = useRef<HTMLButtonElement | null>(null);
@@ -172,6 +186,7 @@ export function FloatingChatWidget({ onOpenChange }: FloatingChatWidgetProps) {
           id: createMessageId(response.assistant_message),
           role: "assistant",
           content: response.assistant_message.content,
+          proposal: response.proposal,
         },
       ]);
     } catch (requestError) {
@@ -197,6 +212,65 @@ export function FloatingChatWidget({ onOpenChange }: FloatingChatWidgetProps) {
     );
     setSession(created);
     return created;
+  }
+
+  async function handleApplyProposal(proposal: ReportEditProposal) {
+    if (proposalActionId || proposal.status !== "draft") {
+      return;
+    }
+    const actionId = `${proposal.id}:apply`;
+    setProposalActionId(actionId);
+    setError(null);
+    try {
+      const response = await applyReportEditProposal(proposal.id, {
+        reason: "Applied from floating chat proposal card.",
+      });
+      updateProposalInMessages(response.proposal);
+      window.dispatchEvent(
+        new CustomEvent(REPORT_VERSION_UPDATED_EVENT, {
+          detail: {
+            report_id: response.report.id,
+            version_id: response.version.id,
+          },
+        }),
+      );
+    } catch (requestError) {
+      setError(proposalActionError(requestError, locale));
+    } finally {
+      setProposalActionId(null);
+    }
+  }
+
+  async function handleRejectProposal(proposal: ReportEditProposal) {
+    if (proposalActionId || proposal.status !== "draft") {
+      return;
+    }
+    const actionId = `${proposal.id}:reject`;
+    setProposalActionId(actionId);
+    setError(null);
+    try {
+      const rejected = await rejectReportEditProposal(proposal.id, {
+        reason: "Rejected from floating chat proposal card.",
+      });
+      updateProposalInMessages(rejected);
+    } catch (requestError) {
+      setError(proposalActionError(requestError, locale));
+    } finally {
+      setProposalActionId(null);
+    }
+  }
+
+  function updateProposalInMessages(proposal: ReportEditProposal) {
+    setMessages((current) =>
+      current.map((message) =>
+        message.proposal?.id === proposal.id
+          ? {
+              ...message,
+              proposal,
+            }
+          : message,
+      ),
+    );
   }
 
   return (
@@ -273,19 +347,29 @@ export function FloatingChatWidget({ onOpenChange }: FloatingChatWidgetProps) {
             ) : (
               <div className="grid gap-3">
                 {messages.map((message) => (
-                  <article
-                    key={message.id}
-                    className={`max-w-[92%] rounded-lg border px-3 py-2.5 ${
-                      message.role === "user"
-                        ? "ml-auto border-river/20 bg-river/5"
-                        : "mr-auto border-slate-200 bg-slate-50"
-                    }`}
-                  >
-                    <p className="text-xs font-semibold text-slate-500">
-                      {message.role === "user" ? text("你", "You") : text(role.labelZh, role.labelEn)}
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-ink">{message.content}</p>
-                  </article>
+                  <div key={message.id} className="grid gap-2">
+                    <article
+                      className={`max-w-[92%] rounded-lg border px-3 py-2.5 ${
+                        message.role === "user"
+                          ? "ml-auto border-river/20 bg-river/5"
+                          : "mr-auto border-slate-200 bg-slate-50"
+                      }`}
+                    >
+                      <p className="text-xs font-semibold text-slate-500">
+                        {message.role === "user" ? text("你", "You") : text(role.labelZh, role.labelEn)}
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-ink">{message.content}</p>
+                    </article>
+                    {message.proposal ? (
+                      <ReportProposalCard
+                        actionId={proposalActionId}
+                        proposal={message.proposal}
+                        text={text}
+                        onApply={handleApplyProposal}
+                        onReject={handleRejectProposal}
+                      />
+                    ) : null}
+                  </div>
                 ))}
               </div>
             )}
@@ -405,6 +489,151 @@ function safeChatError(error: unknown, locale: "zh-CN" | "en"): string {
   return locale === "en"
     ? "The assistant could not respond just now. Please try again."
     : "助手刚才未能完成回答，请稍后重试。";
+}
+
+function proposalActionError(error: unknown, locale: "zh-CN" | "en"): string {
+  if (error instanceof ApiError && error.status === 409) {
+    return locale === "en"
+      ? "This proposal no longer matches the current report version. Ask the assistant to revise the latest report."
+      : "这条修改建议已不是当前报告版本，请让助手基于最新报告重新生成。";
+  }
+  if (error instanceof ApiError && error.status === 422) {
+    return locale === "en"
+      ? "The proposal did not pass report quality review. Check the risk notes and generate a safer draft."
+      : "修改建议未通过报告质检，请查看风险提示并重新生成。";
+  }
+  if (error instanceof ApiError && error.status === 404) {
+    return locale === "en" ? "This proposal was not found. Refresh the page and try again." : "未找到这条修改建议，请刷新后重试。";
+  }
+  return locale === "en" ? "The proposal action failed. Please try again." : "修改建议操作失败，请稍后重试。";
+}
+
+function ReportProposalCard({
+  proposal,
+  actionId,
+  text,
+  onApply,
+  onReject,
+}: {
+  proposal: ReportEditProposal;
+  actionId: string | null;
+  text: TextFn;
+  onApply: (proposal: ReportEditProposal) => Promise<void>;
+  onReject: (proposal: ReportEditProposal) => Promise<void>;
+}) {
+  const summary = proposalSummary(proposal, text);
+  const rationale = proposalRationale(proposal, text);
+  const qualityStatus = proposalQualityStatus(proposal);
+  const draft = proposal.proposed_markdown?.trim() ?? "";
+  const risks = proposal.risk_notes?.filter((note) => note.trim().length > 0).slice(0, 5) ?? [];
+  const actionable = proposal.status === "draft";
+  const applying = actionId === `${proposal.id}:apply`;
+  const rejecting = actionId === `${proposal.id}:reject`;
+  const disabled = Boolean(actionId) || !actionable;
+
+  return (
+    <section className="mr-auto max-w-full rounded-lg border border-river/20 bg-white p-3 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-ink">{text("报告修改建议", "Report edit proposal")}</p>
+          <p className="mt-1 text-xs text-slate-500">{text("确认后才会生成新版本，原报告不会被覆盖。", "Confirming creates a new version without overwriting the current report.")}</p>
+        </div>
+        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+          {proposalStatusLabel(proposal.status, text)}
+        </span>
+      </div>
+
+      <div className="mt-3 grid gap-3 text-sm leading-6">
+        <div>
+          <p className="text-xs font-semibold text-slate-500">{text("修改摘要", "Modification summary")}</p>
+          <p className="mt-1 text-ink">{summary}</p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-slate-500">{text("修改理由", "Rationale")}</p>
+          <p className="mt-1 text-ink">{rationale}</p>
+        </div>
+        {qualityStatus ? (
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-xs font-semibold text-slate-500">{text("质检状态", "Quality status")}</p>
+            <p className="mt-1 text-sm text-ink">{qualityStatus}</p>
+          </div>
+        ) : null}
+        {risks.length > 0 ? (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+            <p className="text-xs font-semibold text-amber-800">{text("风险提示", "Risk notes")}</p>
+            <ul className="mt-1 list-disc space-y-1 pl-4 text-xs leading-5 text-amber-900">
+              {risks.map((risk) => (
+                <li key={risk}>{risk}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <div>
+          <p className="text-xs font-semibold text-slate-500">{text("修改后的 Markdown 草稿", "Revised Markdown draft")}</p>
+          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 p-2 text-xs leading-5 text-slate-700">
+            {draft || text("暂无草稿内容", "No draft content available")}
+          </pre>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          className="rounded-md bg-river px-3 py-2 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:bg-slate-300"
+          disabled={disabled}
+          type="button"
+          onClick={() => void onApply(proposal)}
+        >
+          {applying ? text("应用中", "Applying") : text("应用修改", "Apply edit")}
+        </button>
+        <button
+          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+          disabled={disabled}
+          type="button"
+          onClick={() => void onReject(proposal)}
+        >
+          {rejecting ? text("拒绝中", "Rejecting") : text("拒绝修改", "Reject edit")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function proposalSummary(proposal: ReportEditProposal, text: TextFn): string {
+  const diff = asRecord(proposal.diff);
+  return readString(diff, "summary") || proposal.user_intent || text("已生成报告修改草稿。", "A revised report draft has been generated.");
+}
+
+function proposalRationale(proposal: ReportEditProposal, text: TextFn): string {
+  const diff = asRecord(proposal.diff);
+  return readString(diff, "rationale") || text("按当前报告上下文调整表达，并保留证据边界。", "The draft adjusts the report using current context while preserving evidence boundaries.");
+}
+
+function proposalQualityStatus(proposal: ReportEditProposal): string | null {
+  const diff = asRecord(proposal.diff);
+  const quality = asRecord(diff?.quality);
+  return readString(quality, "status");
+}
+
+function proposalStatusLabel(status: string, text: TextFn): string {
+  if (status === "accepted") {
+    return text("已应用", "Applied");
+  }
+  if (status === "rejected") {
+    return text("已拒绝", "Rejected");
+  }
+  if (status === "pending_review") {
+    return text("待复核", "Pending review");
+  }
+  return text("待确认", "Pending confirmation");
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function readString(source: Record<string, unknown> | null, key: string): string | null {
+  const value = source?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function createMessageId(message?: ChatMessage): string {

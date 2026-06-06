@@ -13,36 +13,50 @@ import { SuccessState } from "../../_components/SuccessState";
 import {
   DashboardResponse,
   Report,
+  ReportVersion,
   generateReport,
   getDashboard,
   getFriendlyErrorMessage,
   getReport,
+  listReportVersions,
+  restoreReportVersion,
 } from "../../_lib/api-client";
 
 type ReportDetailWorkspaceProps = {
   reportId: number;
 };
 
+const REPORT_VERSION_UPDATED_EVENT = "report-version-updated";
+
 export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) {
   const router = useRouter();
   const [report, setReport] = useState<Report | null>(null);
+  const [versions, setVersions] = useState<ReportVersion[]>([]);
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
+  const [restoringVersionId, setRestoringVersionId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    async function loadReport() {
-      setLoading(true);
+  const loadReport = useMemo(() => {
+    return async (signal?: AbortSignal, options: { showLoading?: boolean } = {}) => {
+      if (options.showLoading ?? true) {
+        setLoading(true);
+      }
       setError(null);
       try {
-        const reportResponse = await getReport(reportId, controller.signal);
+        const reportResponse = await getReport(reportId, signal);
         setReport(reportResponse);
         try {
-          setDashboard(await getDashboard(reportResponse.analysis_id, controller.signal));
+          const versionResponse = await listReportVersions(reportId, signal);
+          setVersions(versionResponse.items);
+        } catch {
+          setVersions([]);
+        }
+        try {
+          setDashboard(await getDashboard(reportResponse.analysis_id, signal));
         } catch {
           setDashboard(null);
         }
@@ -52,15 +66,33 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
         }
         setError(getFriendlyErrorMessage(requestError));
         setReport(null);
+        setVersions([]);
         setDashboard(null);
       } finally {
-        setLoading(false);
+        if (options.showLoading ?? true) {
+          setLoading(false);
+        }
       }
-    }
-
-    void loadReport();
-    return () => controller.abort();
+    };
   }, [reportId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadReport(controller.signal, { showLoading: true });
+    return () => controller.abort();
+  }, [loadReport]);
+
+  useEffect(() => {
+    function handleVersionUpdated(event: Event) {
+      const detail = event instanceof CustomEvent ? event.detail : null;
+      if (detail && typeof detail.report_id === "number" && detail.report_id !== reportId) {
+        return;
+      }
+      void loadReport(undefined, { showLoading: false });
+    }
+    window.addEventListener(REPORT_VERSION_UPDATED_EVENT, handleVersionUpdated);
+    return () => window.removeEventListener(REPORT_VERSION_UPDATED_EVENT, handleVersionUpdated);
+  }, [loadReport, reportId]);
 
   const fallbackUsed = useMemo(() => {
     if (!dashboard) {
@@ -106,6 +138,27 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
       setError(withReportRetryMessage(getFriendlyErrorMessage(requestError)));
     } finally {
       setRegenerating(false);
+    }
+  }
+
+  async function restoreVersion(version: ReportVersion) {
+    if (!report || restoringVersionId) {
+      return;
+    }
+    setRestoringVersionId(version.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const restored = await restoreReportVersion(report.id, version.id, {
+        reason: `Restore report version ${version.version_number}.`,
+      });
+      setReport(restored.report);
+      setNotice(`已恢复到 v${version.version_number}，并保存为新版本 v${restored.version.version_number}。`);
+      await loadReport(undefined, { showLoading: false });
+    } catch (requestError) {
+      setError(getFriendlyErrorMessage(requestError));
+    } finally {
+      setRestoringVersionId(null);
     }
   }
 
@@ -211,6 +264,48 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
       </div>
 
       <section className="mt-5 rounded-lg border border-slate-200 bg-white p-5 shadow-panel">
+        <div className="mb-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-ink">版本列表</h2>
+              <p className="mt-1 text-sm text-slate-500">应用聊天修改或恢复旧版本都会追加一个新版本，原版本保留。</p>
+            </div>
+            <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+              current_version_id = {report.current_version_id ?? "-"}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2">
+            {versions.length === 0 ? (
+              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">暂无版本记录。</p>
+            ) : (
+              versions.map((version) => {
+                const current = version.id === report.current_version_id;
+                return (
+                  <div key={version.id} className="flex flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-ink">v{version.version_number}</span>
+                        <VersionBadge label={version.source_type} />
+                        {current ? <VersionBadge label="当前版本" tone="current" /> : null}
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        {formatDate(version.created_at)} · {version.version_note || "无版本说明"}
+                      </p>
+                    </div>
+                    <button
+                      className="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                      disabled={current || restoringVersionId !== null}
+                      type="button"
+                      onClick={() => void restoreVersion(version)}
+                    >
+                      {restoringVersionId === version.id ? "恢复中" : "恢复此版本"}
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
         {report.content_html ? (
           <div dangerouslySetInnerHTML={{ __html: report.content_html }} />
         ) : report.content_markdown ? (
@@ -223,12 +318,22 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
   );
 }
 
+function VersionBadge({ label, tone = "default" }: { label: string; tone?: "default" | "current" }) {
+  const className = tone === "current" ? "bg-jade/10 text-jade ring-jade/20" : "bg-white text-slate-600 ring-slate-200";
+  return <span className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 ${className}`}>{label}</span>;
+}
+
 function formatScore(value: string | number | null | undefined): string {
   if (value === null || value === undefined) {
     return "-";
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed.toFixed(1) : String(value);
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function withReportRetryMessage(message: string): string {

@@ -75,6 +75,12 @@ class ReportVersionRead(ReportVersionBase):
     created_at: datetime
 
 
+class ReportVersionListResponse(BaseModel):
+    items: list[ReportVersionRead] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    current_version_id: int | None = None
+
+
 class ReportEditProposalBase(BaseModel):
     report_id: int = Field(ge=1)
     target_version_id: int | None = Field(default=None, ge=1)
@@ -102,3 +108,26 @@ class ReportEditProposalRead(ReportEditProposalBase):
     id: int
     created_at: datetime
     updated_at: datetime
+
+
+class ReportProposalDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class ReportVersionRestoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class ReportProposalConfirmResponse(BaseModel):
+    report: ReportRead
+    version: ReportVersionRead
+    proposal: ReportEditProposalRead
+
+
+class ReportVersionRestoreResponse(BaseModel):
+    report: ReportRead
+    version: ReportVersionRead

@@ -302,11 +302,31 @@ export type ChatMessage = {
   created_at: string;
 };
 
+export type ReportEditProposal = {
+  id: number;
+  report_id: number;
+  target_version_id: number | null;
+  source_chat_session_id: number | null;
+  user_intent: string;
+  proposed_markdown: string | null;
+  proposed_html: string | null;
+  diff: Record<string, unknown> | null;
+  replacement_blocks: Array<Record<string, unknown>> | null;
+  risk_notes: string[] | null;
+  evidence: Array<Record<string, unknown>> | null;
+  confidence_score: string | number | null;
+  status: string;
+  accepted_version_id: number | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ChatSendResponse = {
   session: ChatSession;
   user_message: ChatMessage;
   assistant_message: ChatMessage;
-  proposal: Record<string, unknown> | null;
+  proposal: ReportEditProposal | null;
 };
 
 export type ProductDraftSellingPoints = {
@@ -509,6 +529,7 @@ export type Report = {
   content_markdown: string | null;
   content_html: string | null;
   pdf_url: string | null;
+  current_version_id: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -516,6 +537,37 @@ export type Report = {
 export type ReportListResponse = {
   items: Report[];
   total: number;
+};
+
+export type ReportVersion = {
+  id: number;
+  report_id: number;
+  version_number: number;
+  parent_version_id: number | null;
+  content_markdown: string | null;
+  content_html: string | null;
+  source_type: string;
+  source_proposal_id: number | null;
+  created_by: string | null;
+  version_note: string | null;
+  created_at: string;
+};
+
+export type ReportVersionListResponse = {
+  items: ReportVersion[];
+  total: number;
+  current_version_id: number | null;
+};
+
+export type ReportProposalDecisionResponse = {
+  report: Report;
+  version: ReportVersion;
+  proposal: ReportEditProposal;
+};
+
+export type ReportVersionRestoreResponse = {
+  report: Report;
+  version: ReportVersion;
 };
 
 export type ReportGenerateRequest = {
@@ -1346,6 +1398,53 @@ export async function listReports(
 export async function getReport(reportId: number, signal?: AbortSignal): Promise<Report> {
   return requestJson<Report>(`/api/reports/${reportId}`, {
     cache: "no-store",
+    signal,
+  });
+}
+
+export async function listReportVersions(
+  reportId: number,
+  signal?: AbortSignal,
+): Promise<ReportVersionListResponse> {
+  return requestJson<ReportVersionListResponse>(`/api/reports/${reportId}/versions`, {
+    cache: "no-store",
+    signal,
+  });
+}
+
+export async function applyReportEditProposal(
+  proposalId: number,
+  payload: { reason?: string | null } = {},
+  signal?: AbortSignal,
+): Promise<ReportProposalDecisionResponse> {
+  return requestJson<ReportProposalDecisionResponse>(`/api/reports/proposals/${proposalId}/confirm`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function rejectReportEditProposal(
+  proposalId: number,
+  payload: { reason?: string | null } = {},
+  signal?: AbortSignal,
+): Promise<ReportEditProposal> {
+  return requestJson<ReportEditProposal>(`/api/reports/proposals/${proposalId}/reject`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export async function restoreReportVersion(
+  reportId: number,
+  versionId: number,
+  payload: { reason?: string | null } = {},
+  signal?: AbortSignal,
+): Promise<ReportVersionRestoreResponse> {
+  return requestJson<ReportVersionRestoreResponse>(`/api/reports/${reportId}/versions/${versionId}/restore`, {
+    method: "POST",
+    body: JSON.stringify(payload),
     signal,
   });
 }

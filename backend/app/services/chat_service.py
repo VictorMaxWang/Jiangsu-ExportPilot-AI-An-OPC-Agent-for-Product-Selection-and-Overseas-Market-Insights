@@ -25,6 +25,7 @@ from app.services.ai import BailianError
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 from app.services.ai.prompts import build_global_chat_messages
 from app.services.dashboard_service import DashboardService
+from app.services.report_quality import assess_report_markdown, quality_issue_messages, report_fallback_expected
 from app.services.reports import render_report_html
 from app.utils.redaction import redact_mapping, redact_text
 
@@ -153,12 +154,12 @@ class ChatService:
             result = await ai_client.chat(
                 build_global_chat_messages(prompt_payload),
                 temperature=0.35,
-                max_tokens=1800,
+                max_tokens=3600,
                 json_mode=True,
             )
             parsed = _parse_ai_payload(result.content)
-            assistant_content = _assistant_content(parsed, result.content)
             intent = _safe_text_value(parsed.get("intent")) or _infer_intent(user_message.content)
+            assistant_content = _assistant_content(parsed, result.content, intent=intent)
             proposal = self._create_report_proposal_if_needed(
                 session=session,
                 user_message=user_message,
@@ -459,10 +460,21 @@ class ChatService:
             "changes": [],
             "proposal_only": True,
         }
+        if "rationale" not in diff:
+            rationale = _optional_limited_text(proposal_data.get("rationale"), MAX_CONTEXT_VALUE_CHARS)
+            diff["rationale"] = rationale or "Human review is required before applying this report proposal."
+        quality = assess_report_markdown(
+            proposed_markdown,
+            fallback_expected=report_fallback_expected(self._db, report),
+        )
+        diff["quality"] = quality
         replacement_blocks = _optional_dict_list(proposal_data.get("replacement_blocks"))
         risk_notes = _optional_string_list(proposal_data.get("risk_notes")) or [
             "Proposal requires human review before creating a new report version.",
         ]
+        for message in quality_issue_messages(quality):
+            if message not in risk_notes:
+                risk_notes.append(message)
         evidence = _optional_dict_list(proposal_data.get("evidence")) or [
             {
                 "source": "report",
@@ -555,7 +567,30 @@ def _parse_ai_payload(content: str) -> dict[str, Any]:
     return parsed
 
 
-def _assistant_content(parsed: dict[str, Any], raw_content: str) -> str:
+def _assistant_content(parsed: dict[str, Any], raw_content: str, *, intent: str | None = None) -> str:
+    if intent == "report_edit_proposal":
+        proposal_payload = parsed.get("proposal")
+        proposal = proposal_payload if isinstance(proposal_payload, dict) else {}
+        diff_payload = proposal.get("diff")
+        diff = diff_payload if isinstance(diff_payload, dict) else {}
+        summary = _safe_text(diff.get("summary") or parsed.get("assistant_message"), MAX_CONTEXT_VALUE_CHARS)
+        rationale = _safe_text(
+            diff.get("rationale") or proposal.get("rationale") or "Proposal needs human review before it can become a report version.",
+            MAX_CONTEXT_VALUE_CHARS,
+        )
+        draft = _optional_limited_text(proposal.get("proposed_markdown"), MAX_REPORT_OUTPUT_CHARS)
+        draft_section = draft or "No markdown draft was returned. Ask the assistant to regenerate the proposal."
+        return _safe_text(
+            "\n\n".join(
+                [
+                    f"修改摘要\n{summary or '已生成报告修改建议。'}",
+                    f"修改后的 Markdown 草稿\n```markdown\n{draft_section}\n```",
+                    f"修改理由\n{rationale}",
+                    "该建议尚未应用。请在聊天卡片中选择应用修改或拒绝修改。",
+                ]
+            ),
+            MAX_REPORT_OUTPUT_CHARS,
+        )
     value = parsed.get("assistant_message")
     if isinstance(value, str) and value.strip():
         return _safe_text(value, MAX_REPORT_OUTPUT_CHARS)
