@@ -3,7 +3,7 @@
 - Task id: S02
 - Owner thread: Codex GitHub Actions auto deploy implementation thread
 - Start time: 2026-06-06 19:40:05 +08:00
-- End time: 2026-06-06 20:15:08 +08:00
+- End time: 2026-06-06 20:19:08 +08:00
 - Production target: `https://opc.ankangyu.cn`
 - Production path: `/opt/supinzhihang`
 
@@ -94,11 +94,13 @@ Do not store `.env`, API keys, cookies, admin passwords, Authorization values, o
 - The deploy workflow was updated again to avoid injecting third-party key or provider toggle env vars into backend tests.
 - Follow-up commit `4cc2e88` triggered `Deploy Production` run `27061956283`; backend tests and frontend checks passed, then the SSH deploy step failed while loading the temporary private key with `error in libcrypto` before server commands ran.
 - The deploy workflow was updated to normalize both real newlines and literal `\n` sequences from `TENCENT_SSH_KEY` into the temporary key file without printing key material.
+- Follow-up commit `a0baefb` triggered `Deploy Production` run `27062051855`; backend tests and frontend checks passed again, but SSH deploy still failed before server commands ran because the temporary key could not be parsed.
 
 ## Blockers
 
-- None for repository-side workflow implementation.
-- Actual production deployment depends on valid GitHub Repository Secrets and SSH access from GitHub-hosted runners to the Tencent Cloud CVM.
+- Repository-side workflow implementation is complete and the GitHub-hosted backend/frontend gates pass.
+- Production deployment is blocked by the current `TENCENT_SSH_KEY` Secret value: OpenSSH on the GitHub runner reports `error in libcrypto` while loading the temporary key file. Verify that the Secret contains the unencrypted private key for the deploy user, not a public key, encrypted key, PuTTY PPK, truncated key, or incorrectly copied value.
+- The existing `.github/workflows/ci.yml` still has a separate workflow-file issue and was not changed in S02.
 
 ## Follow-up Notes
 
