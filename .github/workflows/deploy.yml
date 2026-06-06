@@ -20,7 +20,6 @@ jobs:
     timeout-minutes: 20
     env:
       APP_ENV: test
-      DATABASE_URL: sqlite:///${{ runner.temp }}/supin-deploy-test.db
       DASHSCOPE_API_KEY: ""
       BAILIAN_API_KEY: ""
       YOUTUBE_DATA_API_KEY: ""
@@ -36,7 +35,6 @@ jobs:
       ENABLE_YOUTUBE: "true"
       ENABLE_ETSY: "true"
       ENABLE_UN_COMTRADE: "true"
-      PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pycache
 
     steps:
       - name: Checkout
@@ -57,6 +55,9 @@ jobs:
 
       - name: Run backend tests
         working-directory: backend
+        env:
+          DATABASE_URL: sqlite:///${{ runner.temp }}/supin-deploy-test.db
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pycache
         run: python -m pytest tests -q
 
   frontend-checks:

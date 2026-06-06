@@ -3,7 +3,7 @@
 - Task id: S02
 - Owner thread: Codex GitHub Actions auto deploy implementation thread
 - Start time: 2026-06-06 19:40:05 +08:00
-- End time: 2026-06-06 19:53:53 +08:00
+- End time: 2026-06-06 20:02:22 +08:00
 - Production target: `https://opc.ankangyu.cn`
 - Production path: `/opt/supinzhihang`
 
@@ -83,6 +83,12 @@ Do not store `.env`, API keys, cookies, admin passwords, Authorization values, o
 | `cd frontend && npm run lint` | Passed: no ESLint warnings or errors. |
 | `cd frontend && npm run build` | Passed: Next.js production build completed. |
 | `git diff --check -- .github/workflows/deploy.yml docs/DEPLOYMENT_TENCENT_CLOUD.md docs/status/S02_github_actions_auto_deploy.md` | Passed: no whitespace errors; Git warned that `docs/DEPLOYMENT_TENCENT_CLOUD.md` may be normalized to CRLF on next touch in this Windows checkout. |
+
+## Push Validation
+
+- Initial commit `b1de79f` was pushed to `main` and triggered `.github/workflows/deploy.yml`, but GitHub reported a workflow-file issue before any jobs were created.
+- The deploy workflow was updated to avoid job-level use of `runner.temp`; runner-specific paths now live in step-level environment variables.
+- The existing `.github/workflows/ci.yml` push run for the same commit also reported a workflow-file issue before jobs were created. This appears to be an existing CI workflow problem and was not changed in S02.
 
 ## Blockers
 
