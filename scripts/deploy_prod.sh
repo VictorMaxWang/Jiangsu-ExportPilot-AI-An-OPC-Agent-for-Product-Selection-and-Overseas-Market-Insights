@@ -79,8 +79,8 @@ fi
 echo "Applying database migrations."
 "${COMPOSE[@]}" run --rm --no-deps backend alembic upgrade head
 
-echo "Ensuring product upload volume permissions."
-"${COMPOSE[@]}" run --rm --no-deps --user root backend sh -lc 'mkdir -p /app/storage/product-intake && chown -R appuser:appuser /app/storage'
+echo "Ensuring upload volume permissions."
+"${COMPOSE[@]}" run --rm --no-deps --user root backend sh -lc 'mkdir -p /app/storage/product-intake /app/storage/company-intake && chown -R appuser:appuser /app/storage'
 
 echo "Starting application services."
 "${COMPOSE[@]}" up -d --remove-orphans backend frontend

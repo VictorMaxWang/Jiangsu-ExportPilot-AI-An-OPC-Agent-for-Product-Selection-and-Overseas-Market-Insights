@@ -51,6 +51,8 @@ services:
       BAILIAN_VISION_MODEL: "${BAILIAN_VISION_MODEL:-}"
       PRODUCT_UPLOAD_DIR: "${PRODUCT_UPLOAD_DIR:-/app/storage/product-intake}"
       MAX_PRODUCT_IMAGE_SIZE_MB: "${MAX_PRODUCT_IMAGE_SIZE_MB:-10}"
+      COMPANY_UPLOAD_DIR: "${COMPANY_UPLOAD_DIR:-/app/storage/company-intake}"
+      MAX_COMPANY_IMAGE_SIZE_MB: "${MAX_COMPANY_IMAGE_SIZE_MB:-10}"
       ENABLE_DOMESTIC_URL_FETCH: "${ENABLE_DOMESTIC_URL_FETCH:-false}"
       ENABLE_YOUTUBE: "${ENABLE_YOUTUBE:-true}"
       ENABLE_ETSY: "${ENABLE_ETSY:-true}"
@@ -68,6 +70,7 @@ services:
       REDDIT_REDIRECT_URI: "${REDDIT_REDIRECT_URI:-https://opc.ankangyu.cn/auth/reddit/callback}"
     volumes:
       - product_uploads:/app/storage/product-intake
+      - company_uploads:/app/storage/company-intake
     ports:
       - "127.0.0.1:${BACKEND_BIND_PORT:-8000}:8000"
     depends_on:
@@ -116,3 +119,4 @@ volumes:
   postgres_data:
   redis_data:
   product_uploads:
+  company_uploads:

@@ -13,6 +13,19 @@ Internet
 
 生产部署使用 `docker-compose.prod.yml`。不要用本地开发 `docker-compose.yml` 对公网部署，因为本地配置会暴露 PostgreSQL 和 Redis 端口。
 
+## 0. 生产能力清单
+
+当前生产演示应覆盖以下能力：
+
+- 多图商品录入：`/products/import` 支持一次上传多张商品截图或产品图，后端合并证据后生成产品草稿，用户确认后再入库。
+- 企业照片上传：`/companies/import` 支持上传企业门头、展台、名片、产品目录或资质截图，生成企业草稿，人工确认后才创建正式企业。
+- 五大洲目标市场：`/analysis/run` 从后端目标国家目录加载国家，支持亚洲、欧洲、北美、拉美、大洋洲和非洲组合分析。
+- 全局聊天：聊天只读取当前企业、产品、分析或报告上下文的脱敏摘要，用于解释报告、数据来源、风险边界和下一步动作。
+- 报告版本：聊天修改报告只生成 proposal；用户确认后创建新的 `report_versions` 记录，原版本保留。
+- 自动部署：GitHub Actions 可在推送 `main` 后通过 SSH 登录 CVM，执行 `git pull` 和 `bash scripts/deploy_prod.sh` 完成升级。
+
+生产现场话术应强调“可解释、可复核、可人工确认”，不要把 fallback 描述成真实外部平台结果，也不要把报告描述成法律、关税、财务或确定性经营结论。
+
 ## 1. 服务器准备
 
 - 推荐 Ubuntu 22.04 LTS 或 24.04 LTS，最低 2 vCPU / 4 GB RAM，建议 40 GB 以上系统盘。
@@ -128,7 +141,10 @@ BAILIAN_VISION_ENABLED=false
 BAILIAN_VISION_MODEL=
 PRODUCT_UPLOAD_DIR=/app/storage/product-intake
 MAX_PRODUCT_IMAGE_SIZE_MB=10
+COMPANY_UPLOAD_DIR=/app/storage/company-intake
+MAX_COMPANY_IMAGE_SIZE_MB=10
 ENABLE_DOMESTIC_URL_FETCH=false
+DATA_COLLECTION_CONCURRENCY=3
 ```
 
 注意：
@@ -138,6 +154,9 @@ ENABLE_DOMESTIC_URL_FETCH=false
 - 生产环境不要设置 `ADMIN_AUTH_ENABLED=false`。
 - `PRODUCT_UPLOAD_DIR` 必须和 `docker-compose.prod.yml` 中的 `product_uploads` volume 挂载路径一致，默认使用 `/app/storage/product-intake`。
 - `MAX_PRODUCT_IMAGE_SIZE_MB` 控制单张商品截图大小，默认 10 MB；Nginx `client_max_body_size` 必须大于该值。
+- `COMPANY_UPLOAD_DIR` 必须和 `docker-compose.prod.yml` 中的 `company_uploads` volume 挂载路径一致，默认使用 `/app/storage/company-intake`。
+- `MAX_COMPANY_IMAGE_SIZE_MB` 控制单张企业照片大小，默认 10 MB；Nginx `client_max_body_size` 必须同时覆盖商品和企业上传。
+- `DATA_COLLECTION_CONCURRENCY` 控制外部数据采集并发，默认 `3`，用于在多国家分析时兼顾速度和第三方接口稳定性。
 - `ENABLE_DOMESTIC_URL_FETCH=false` 是生产安全默认值。关闭时单链接解析只做平台和 URL 安全识别，并提示用户上传截图继续分析。
 
 ## 5. 配置 API Key
@@ -175,6 +194,31 @@ UN_COMTRADE_API_KEY=<optional-un-comtrade-key>
 
 国内商品链接解析只处理用户主动提交的单个链接，不使用 Cookie、登录态、验证码服务、代理池或模拟登录。登录、验证码、风控、超时、非 HTML、响应过大或结构不可解析时，系统返回 `needs_screenshot` 并提示上传商品截图，不应描述为绕过平台限制。
 
+## 5.1 上传与草稿确认
+
+生产上传目录必须使用 Docker volume 或宿主机持久化目录，不能放在镜像临时层：
+
+```text
+product_uploads:/app/storage/product-intake
+company_uploads:/app/storage/company-intake
+```
+
+商品多图上传约束：
+
+- 前端最多选择 8 张商品图片或截图。
+- 后端只接受 PNG、JPEG、WebP 等图片类型，并按 `MAX_PRODUCT_IMAGE_SIZE_MB` 限制单图大小。
+- 识别结果必须展示置信度、证据摘录和风险提示；只有用户点击确认后才写入正式产品库。
+- 部分图片上传失败时应生成低置信度草稿或错误提示，不应静默忽略。
+
+企业照片上传约束：
+
+- 前端最多选择 4 张企业照片或资料截图。
+- 上传前应裁剪手机号、地址、聊天记录、证件号码、订单号和账号头像等隐私信息。
+- 企业草稿只保存企业名称、地区、行业、描述、主营产品、目标市场建议、置信度和最小证据摘录。
+- 用户确认前不得把 AI 识别结果当成正式企业档案。
+
+运维排查时可以查看文件数量、目录权限和文件类型，但不要把用户上传图片同步到 GitHub、CI 日志、公开演示截图或聊天记录。
+
 ## 6. 启动 Docker Compose
 
 首次部署或升级推荐使用脚本：
@@ -198,9 +242,10 @@ bash scripts/deploy_prod.sh
 
 ```text
 product_uploads:/app/storage/product-intake
+company_uploads:/app/storage/company-intake
 ```
 
-该 volume 用于保存用户主动上传的商品截图，容器重建后不会丢失。不要把 volume 内容提交 GitHub；如业务需要保留截图，应把该 volume 纳入服务器备份策略，并确保备份访问权限受控。
+这些 volume 用于保存用户主动上传的商品截图和企业照片，容器重建后不会丢失。不要把 volume 内容提交 GitHub；如业务需要保留截图，应把 volume 纳入服务器备份策略，并确保备份访问权限受控。
 
 手动命令：
 
@@ -209,6 +254,7 @@ docker compose --project-name supinzhihang_prod --env-file .env -f docker-compos
 docker compose --project-name supinzhihang_prod --env-file .env -f docker-compose.prod.yml build --pull backend frontend
 docker compose --project-name supinzhihang_prod --env-file .env -f docker-compose.prod.yml up -d postgres redis
 docker compose --project-name supinzhihang_prod --env-file .env -f docker-compose.prod.yml run --rm --no-deps backend alembic upgrade head
+docker compose --project-name supinzhihang_prod --env-file .env -f docker-compose.prod.yml run --rm --no-deps --user root backend sh -lc 'mkdir -p /app/storage/product-intake /app/storage/company-intake && chown -R appuser:appuser /app/storage'
 docker compose --project-name supinzhihang_prod --env-file .env -f docker-compose.prod.yml up -d --remove-orphans backend frontend
 ```
 
@@ -232,7 +278,7 @@ docs/nginx/opc.ankangyu.cn.conf
 - `/` 转发到 `http://127.0.0.1:3000`
 - `/api` 和 `/api/` 转发到 `http://127.0.0.1:8000`
 - `/health` 转发到 `http://127.0.0.1:8000/health`
-- `client_max_body_size 20m` 支持 CSV 上传和商品截图上传，并应大于 `.env` 中的 `MAX_PRODUCT_IMAGE_SIZE_MB`
+- `client_max_body_size 20m` 支持 CSV、商品多图和企业照片上传，并应大于 `.env` 中的 `MAX_PRODUCT_IMAGE_SIZE_MB` 与 `MAX_COMPANY_IMAGE_SIZE_MB`
 
 如果使用宝塔面板，可在站点反向代理中按上述路径配置，或把示例文件中的 location 合并到宝塔生成的站点配置。证书路径由宝塔或腾讯云 SSL 控制台管理，不要提交真实私钥。
 
@@ -258,6 +304,77 @@ docker compose --project-name supinzhihang_prod --env-file .env -f docker-compos
 ```
 
 迁移前必须备份数据库。不要在生产环境直接删除 volume 或执行未审查的 downgrade。
+
+## 9.1 聊天与报告版本验收
+
+升级后建议做一次非破坏性验收：
+
+1. 打开任意报告详情页，确认版本列表可见。
+2. 通过全局聊天询问“解释这份报告的主要风险和数据来源”。
+3. 让聊天生成一条报告修改建议，确认页面显示 proposal，而不是直接覆盖报告。
+4. 点击应用后确认新增版本号，旧版本仍可查看。
+5. 点击拒绝另一条 proposal，确认只更新 proposal 状态，不产生新版本。
+
+聊天上下文只应包含当前企业、产品、分析和报告的脱敏摘要。不要把 `.env`、API Key、Cookie、认证头或完整数据库连接串复制给聊天。
+
+## 9.2 GitHub Actions 自动部署
+
+推荐的自动部署方式是：GitHub Actions 在 `main` 分支 push 后通过 SSH 登录 CVM，在 `/opt/supinzhihang` 中拉取最新代码并运行生产部署脚本。
+
+服务器侧准备：
+
+```bash
+cd /opt/supinzhihang
+git remote -v
+test -f .env
+bash scripts/deploy_prod.sh
+```
+
+GitHub 仓库只保存 Action 所需的 Secret 名称，不在仓库写真实值。建议 Secret：
+
+```text
+TENCENT_CVM_HOST
+TENCENT_CVM_USER
+TENCENT_CVM_SSH_KEY
+TENCENT_CVM_PORT
+TENCENT_CVM_DEPLOY_PATH
+```
+
+工作流示例：
+
+```yaml
+name: deploy-production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy on Tencent Cloud CVM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.TENCENT_CVM_HOST }}
+          username: ${{ secrets.TENCENT_CVM_USER }}
+          key: ${{ secrets.TENCENT_CVM_SSH_KEY }}
+          port: ${{ secrets.TENCENT_CVM_PORT }}
+          script: |
+            set -Eeuo pipefail
+            cd "${{ secrets.TENCENT_CVM_DEPLOY_PATH }}"
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+            bash scripts/deploy_prod.sh
+```
+
+安全要求：
+
+- 不要把 `.env` 放进 GitHub Actions artifact、日志或缓存。
+- 不要在 workflow 中 `echo` Secret。
+- 如果部署失败，只粘贴失败阶段、退出码和非敏感日志摘要。
+- 生产升级前由 `scripts/deploy_prod.sh` 自动备份数据库；如跳过备份，必须在状态记录中说明原因。
 
 ## 10. 查看日志
 
@@ -295,7 +412,7 @@ BACKUP_DIR=/data/backups/supinzhihang bash scripts/backup_db.sh
 
 脚本使用 PostgreSQL custom dump 格式，并用 `pg_restore --list` 校验归档。备份文件权限为 `0600`。
 
-数据库备份不包含 `product_uploads` volume。若比赛或生产演示需要保留用户上传截图，应单独备份 Docker volume 或宿主机映射目录，并继续遵守“不公开、不提交、不截图泄露”的规则。
+数据库备份不包含 `product_uploads` 和 `company_uploads` volume。若比赛或生产演示需要保留用户上传截图，应单独备份 Docker volume 或宿主机映射目录，并继续遵守“不公开、不提交、不截图泄露”的规则。
 
 ## 12. 回滚
 
@@ -353,9 +470,22 @@ RESTORE_CONFIRM=supinzhihang_prod bash scripts/restore_db.sh /var/backups/supinz
 检查：
 
 - Nginx `client_max_body_size` 是否大于 `MAX_PRODUCT_IMAGE_SIZE_MB`。
-- `.env` 中 `MAX_PRODUCT_IMAGE_SIZE_MB` 是否设置过低。
+- `.env` 中 `MAX_PRODUCT_IMAGE_SIZE_MB` 或 `MAX_COMPANY_IMAGE_SIZE_MB` 是否设置过低。
 - 上传文件是否为 PNG、JPEG 或 WebP。
-- 后端 `PRODUCT_UPLOAD_DIR` 是否与 compose volume 挂载路径一致。
+- 后端 `PRODUCT_UPLOAD_DIR`、`COMPANY_UPLOAD_DIR` 是否与 compose volume 挂载路径一致。
+
+### 聊天没有修改报告
+
+确认聊天返回的是 proposal 卡片。系统设计为“先建议、再确认、后保存版本”，不会直接覆盖当前报告。如果没有 proposal，检查报告详情页是否提供 `report_id` 和当前版本上下文，以及 backend 日志中的非敏感错误码。
+
+### 五大洲国家选择很慢
+
+检查：
+
+- `DATA_COLLECTION_CONCURRENCY` 是否为合理值，例如 `3`。
+- 目标国家数量是否超过演示需要；现场建议使用 6 个国家覆盖五大洲。
+- provider 是否命中缓存或 CSV fallback。
+- 后端日志是否出现第三方限流、超时或网络错误。
 
 ### 端口 5432 或 6379 无法访问
 
