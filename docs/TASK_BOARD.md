@@ -1,8 +1,18 @@
 # 开发任务看板
 
-状态枚举：`not_started`、`in_progress`、`blocked`、`done`。
+状态枚举：`not_started`、`in_progress`、`blocked`、`done_local`、`blocked_production_validation`、`blocked_deploy`、`done`。
+
+状态说明：`done_local` 表示代码或文档已在本地/主分支完成并通过本地验证，但尚未完成生产上线验收；`blocked_production_validation` 表示生产验收被未部署路由阻塞；`blocked_deploy` 表示部署执行本身被阻塞。
 
 并行规则：普通任务线程只写自己的 `docs/status/*_*.md` 状态文件；`agent.md` 和 `docs/TASK_BOARD.md` 由总控线程合并。不得读取、复制或输出本地敏感凭据文件内容。
+
+## 当前真实状态
+
+- 主分支已包含 Q40-Q53 的大量代码、文档和状态文件，Q41-Q51 已完成本地实现与本地验证记录，Q53 已完成演示/部署文档更新。
+- 生产环境 `https://opc.ankangyu.cn` 尚未部署 Q42、Q44-Q45、Q47-Q51 等新增路由和页面，生产仍返回多项 404。
+- Q52 端到端验收不是完成态，当前状态为 `blocked_production_validation`；必须在生产部署新路由后重跑。
+- Q54 生产部署与升级验收不是完成态，当前状态为 `blocked_deploy`；必须先恢复 SSH 或部署流水线，再执行部署并重跑生产验收。
+- 后续任务应优先完成部署和验收，不开发新功能，避免继续扩大代码与生产环境的状态差距。
 
 ## 已完成任务
 
@@ -56,20 +66,20 @@
 | 任务 | 名称 | 优先级 | 状态 | 依赖 | 并行关系 | 主要产出 |
 | --- | --- | --- | --- | --- | --- | --- |
 | Q40 | 产品升级需求与架构重排 | P0 | done | Q39 | 总控文档任务 | 更新项目简介、架构、任务板，新增产品升级规格、插件借鉴评估、第三方 notice 和 Q40 状态记录。 |
-| Q41 | 多图商品录入后端规格与数据模型 | P0 | not_started | Q40 | 可与 Q43、Q44 并行 | 多图 Product Intake 数据模型、导入任务、图片资产、AI 契约和草稿确认后端方案；不借插件实现，只借 evidence ledger 思路。 |
-| Q42 | 多图商品录入前端体验 | P0 | not_started | Q41 | 依赖后端契约 | 多图上传、预览、排序、删除、草稿证据展示、低置信度提示和确认入库 UI；只借 Product Design 的 brief、截图证据、响应式和可访问性审查方法。 |
-| Q43 | 拍照新增企业后端与 `company_drafts` | P0 | not_started | Q40 | 可与 Q41、Q44 并行 | Company Intake 数据模型、企业图片导入、企业草稿、确认入正式企业和隐私过滤方案；不借 Sales/CRM enrichment。 |
-| Q44 | 后端目标国家与市场区域目录 | P0 | not_started | Q40 | 可与 Q41、Q43 并行 | Target Market Catalog、后端国家库、区域分组、启停状态、默认组合和 provider 映射；不借插件 connector/source registry。 |
-| Q45 | 分析流程接入动态市场目录 | P0 | not_started | Q44 | 依赖目录 API | 分析请求校验、国家/区域选择、provider 映射、fallback 兼容和报告国家名称来源统一；只借 Data Analytics 的来源验证、fallback 和 caveat 方法。 |
-| Q46 | 全局聊天后端编排与上下文权限 | P0 | not_started | Q40 | 可与 Q47 先做接口对齐 | Global Chat 会话、上下文解析、脱敏摘要、AI 调用、报告解析入口和安全错误响应；只借上下文路由思想，权限和脱敏本地实现。 |
-| Q47 | 全局聊天前端窗口 | P0 | not_started | Q46 | 依赖聊天 API | 跨页面聊天入口、上下文感知、消息流、错误态、报告 proposal 卡片和确认入口；只借 Product Design/Sales 的审阅确认体验，不借外部发送或 CRM 写入。 |
-| Q48 | 报告解析与引用定位 | P0 | not_started | Q46 | 可与 Q49 接口预研并行 | 报告章节解析、段落引用、指标定位、版本引用和聊天可解释回答结构；只借 Data Analytics/Financial Markets 的来源、caveat 和 source posture 方法。 |
-| Q49 | 报告修改 proposal 机制 | P0 | not_started | Q48 | 依赖报告解析 | `report_edit_proposals`、修改意图、建议 diff/替换段落、风险提示、状态流和预览 API；借 Sales 的草稿/审阅/确认流程，但 schema/API 本地定义。 |
-| Q50 | 报告版本管理与确认保存 | P0 | not_started | Q49 | 依赖 proposal | `report_versions`、当前版本指针、确认后新版本、版本列表、版本对比和原版本保留；不借插件 artifact packaging 或外部文档写入。 |
-| Q51 | 前端整体信息架构与视觉优化 | P1 | not_started | Q40 | 可与 Q41-Q50 并行，避免改接口 | 导航、工作区、移动端拍照录入、市场选择、报告编辑和空/错状态整体优化；只借 Product Design 的流程审查和设计 QA 方法。 |
-| Q52 | 端到端验收与安全回归 | P0 | not_started | Q42-Q50 | 汇总验证 | 多图商品、拍照企业、动态市场、全局聊天、报告 proposal 和版本链路测试记录；只借 QA checklist 思路，不借插件测试或 MCP validator。 |
-| Q53 | 演示数据、文案与比赛材料更新 | P1 | not_started | Q52 | 依赖功能验收 | Demo 数据、演示脚本、路演话术、风险说明和产品升级展示材料；只借报告/演示叙事结构，不借 CRM、投资、connector 或插件素材。 |
-| Q54 | 生产部署与升级验收记录 | P0 | not_started | Q52-Q53 | 最终收口 | 生产部署检查、线上验收、回滚说明、状态记录和最终交付清单；不借插件安装、connector 配置、workspace app binding 或 marketplace 发布流程。 |
+| Q41 | 产品升级数据库模型 | P0 | done_local | Q40 | 已完成 | 多图商品、企业拍照、目标国家、全局聊天、报告版本和 proposal 数据模型及迁移；状态文件：`docs/status/Q41_upgrade_database_models.md`。 |
+| Q42 | 多图商品录入后端 | P0 | done_local | Q41 | 已完成 | 多图上传、图片角色、AI 多图/单图 fallback、草稿证据和确认链路后端；状态文件：`docs/status/Q42_multi_image_product_intake_backend.md`。 |
+| Q43 | 多图商品录入前端 | P0 | done_local | Q42 | 已完成 | 多图选择、预览、排序、删除、角色、主图和草稿证据 UI；状态文件：`docs/status/Q43_multi_image_product_intake_frontend.md`。 |
+| Q44 | 后端目标国家与市场区域目录 | P0 | done_local | Q41 | 已完成 | 19 国目标市场目录、预设组合、CSV fallback、分析校验和 provider 映射；状态文件：`docs/status/Q44_target_country_catalog_backend.md`。 |
+| Q45 | 目标国家选择前端 | P0 | done_local | Q44 | 已完成 | 分析页动态国家目录、区域/预设选择、国家数量校验和看板国家展示；状态文件：`docs/status/Q45_target_country_selection_frontend.md`。 |
+| Q46 | 前端整体信息架构与视觉优化 | P1 | done_local | Q40 | 已完成 | 导航、状态组件、首页、看板、报告、聊天入口和响应式审查；状态文件：`docs/status/Q46_frontend_overall_polish.md`。 |
+| Q47 | 企业拍照录入后端 | P0 | done_local | Q41 | 已完成 | 企业图片上传、`company_drafts`、隐私过滤、草稿更新/拒绝/确认入库后端；状态文件：`docs/status/Q47_company_photo_intake_backend.md`。 |
+| Q48 | 企业拍照录入前端 | P0 | done_local | Q47 | 已完成 | `/companies/import` 移动端拍照上传、多图预览、企业草稿编辑和确认入库 UI；状态文件：`docs/status/Q48_company_photo_intake_frontend.md`。 |
+| Q49 | 全局聊天后端 | P0 | done_local | Q41 | 已完成 | 会话式 `/api/chat`、上下文解析、脱敏裁剪和报告修改 proposal 生成；状态文件：`docs/status/Q49_global_chat_backend.md`。 |
+| Q50 | 全局聊天前端 | P0 | done_local | Q49 | 已完成 | 全局悬浮聊天窗口、上下文 ID 白名单、角色切换、快捷问题和安全错误态；状态文件：`docs/status/Q50_global_chat_frontend.md`。 |
+| Q51 | 聊天报告修改与版本管理 | P0 | done_local | Q49-Q50 | 已完成 | proposal 确认/拒绝、append-only `report_versions`、旧版本恢复和报告详情版本列表；状态文件：`docs/status/Q51_chat_report_edit_versions.md`。 |
+| Q52 | 端到端验收与安全回归 | P0 | blocked_production_validation | Q42-Q51 | 生产阻塞 | 本地回归通过，但生产缺少多图商品、企业拍照、市场目录、全局聊天和报告版本路由；部署后必须重跑。 |
+| Q53 | 演示数据、文案与比赛材料更新 | P1 | done_local | Q52 | 文档已完成，生产验收仍阻塞 | 更新 README、部署文档、演示脚本、评委 Q&A、生产 compose 和部署脚本；状态文件：`docs/status/Q53_upgrade_docs_competition_update.md`。 |
+| Q54 | 生产部署与升级验收记录 | P0 | blocked_deploy | Q52-Q53 | 部署阻塞 | SSH/部署流水线不可用，生产未升级到 Q40-Q53；恢复部署能力后执行部署并重跑 Q54。 |
 
 ## Q 阶段顺序
 
@@ -86,7 +96,7 @@
 11. Q42 依赖 Q41，Q45 依赖 Q44，Q46-Q48 建立全局聊天和报告解析基础。
 12. Q49-Q50 在报告解析后实现 proposal 和版本管理；聊天修改报告只生成 proposal，用户确认后才保存新版本。
 13. Q51 可与 Q41-Q50 并行做前端体验重排，但不得绕过后端目录、草稿确认和 proposal 确认规则。
-14. Q52-Q54 依次完成端到端验收、安全回归、演示材料更新和生产升级验收。
+14. Q52/Q54 当前均为阻塞态：必须先部署当前主分支到生产，再重跑端到端验收和生产升级验收；在此之前不要继续开发新功能。
 15. Q40-Q54 参考 `openai/role-specific-plugins` 时只借方法，不复制插件实现、`.app.json`、connector app id、MCP 配置、assets、scripts、templates、品牌素材或 workspace 绑定；逐项评估见 `docs/ROLE_PLUGIN_ADAPTATION_PLAN.md`。
 
 ## 状态文件要求
