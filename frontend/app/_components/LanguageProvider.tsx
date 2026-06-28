@@ -18,14 +18,14 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setLocaleState(normalizeLocale(window.localStorage.getItem(localeStorageKey)));
+    setLocaleState(readStoredLocale());
     setHydrated(true);
   }, []);
 
   useEffect(() => {
     document.documentElement.lang = locale;
     if (hydrated) {
-      window.localStorage.setItem(localeStorageKey, locale);
+      writeStoredLocale(locale);
     }
   }, [hydrated, locale]);
 
@@ -53,4 +53,20 @@ export function useI18n(): LanguageContextValue {
 export function LocalizedText({ zh, en }: { zh: string; en?: string }) {
   const { text } = useI18n();
   return <>{text(zh, en)}</>;
+}
+
+function readStoredLocale(): Locale {
+  try {
+    return normalizeLocale(window.localStorage.getItem(localeStorageKey));
+  } catch {
+    return defaultLocale;
+  }
+}
+
+function writeStoredLocale(locale: Locale): void {
+  try {
+    window.localStorage.setItem(localeStorageKey, locale);
+  } catch {
+    // Some embedded browsers and privacy modes deny localStorage access.
+  }
 }

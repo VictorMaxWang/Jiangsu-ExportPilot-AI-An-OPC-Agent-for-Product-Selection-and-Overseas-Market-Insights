@@ -25,7 +25,7 @@ from app.services.ai import (
 from app.services.ai.json_parser import AiJsonParseError, parse_json_object
 
 
-def test_bailian_settings_defaults_and_dashscope_only_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bailian_settings_defaults_and_key_priority(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_bailian_env(monkeypatch)
     get_settings.cache_clear()
     defaults = get_settings()
@@ -40,7 +40,7 @@ def test_bailian_settings_defaults_and_dashscope_only_key(monkeypatch: pytest.Mo
 
     monkeypatch.delenv("DASHSCOPE_API_KEY")
     get_settings.cache_clear()
-    assert get_settings().bailian_api_key is None
+    assert get_settings().bailian_api_key == "bailian-fake-key"
     get_settings.cache_clear()
 
 

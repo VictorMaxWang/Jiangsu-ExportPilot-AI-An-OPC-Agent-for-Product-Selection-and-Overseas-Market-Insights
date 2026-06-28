@@ -162,6 +162,54 @@ def test_create_product_for_missing_company_returns_404(client: TestClient) -> N
     assert response.json() == {"detail": "Company not found"}
 
 
+@pytest.mark.parametrize(
+    "payload_patch",
+    [
+        {"product_name_cn": "   "},
+        {"cost_price_cny": "-0.01"},
+        {"weight_kg": "-0.001"},
+        {"moq": -1},
+    ],
+)
+def test_create_product_rejects_invalid_business_values(
+    client: TestClient,
+    payload_patch: dict[str, object],
+) -> None:
+    company_response = client.post("/api/companies", json={"name": "Validation Demo"})
+    company_id = company_response.json()["id"]
+    payload = {"company_id": company_id, "product_name_cn": "Validation Product"} | payload_patch
+
+    response = client.post("/api/products", json=payload)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"product_name_cn": "   "},
+        {"cost_price_cny": "-0.01"},
+        {"weight_kg": "-0.001"},
+        {"moq": -1},
+    ],
+)
+def test_update_product_rejects_invalid_business_values(
+    client: TestClient,
+    payload: dict[str, object],
+) -> None:
+    company_response = client.post("/api/companies", json={"name": "Validation Update Demo"})
+    company_id = company_response.json()["id"]
+    product_response = client.post(
+        "/api/products",
+        json={"company_id": company_id, "product_name_cn": "Validation Product"},
+    )
+    product_id = product_response.json()["id"]
+
+    response = client.put(f"/api/products/{product_id}", json=payload)
+
+    assert response.status_code == 422
+
+
 def test_delete_company_cascades_products(client: TestClient) -> None:
     company_response = client.post("/api/companies", json={"name": "Cascade Demo"})
     company_id = company_response.json()["id"]

@@ -58,6 +58,22 @@ def test_scoring_results_returns_404_for_unknown_analysis(
     assert response.status_code == 404
 
 
+def test_scoring_run_rejects_unknown_product_ids_mixed_with_valid_ids(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, session_factory = client_with_session
+    company_id, product_id = _seed_product(session_factory)
+
+    response = client.post(
+        "/api/scoring/run",
+        json={"company_id": company_id, "product_ids": [product_id, 99999], "target_countries": ["US"]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "UNSUPPORTED_SCORING_INPUT"
+    assert "not found" in response.json()["detail"]["message"].lower()
+
+
 @pytest.fixture()
 def client_with_session() -> Generator[tuple[TestClient, sessionmaker[Session]], None, None]:
     engine = create_engine(

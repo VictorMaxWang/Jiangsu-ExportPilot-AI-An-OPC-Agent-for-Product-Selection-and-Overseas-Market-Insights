@@ -37,7 +37,12 @@ class Settings(BaseSettings):
     )
     bailian_api_key: str | None = Field(
         default=None,
-        validation_alias="DASHSCOPE_API_KEY",
+        validation_alias=AliasChoices(
+            "DASHSCOPE_API_KEY",
+            "BAILIAN_API_KEY",
+            "SUPIN_DASHSCOPE_API_KEY",
+            "SUPIN_BAILIAN_API_KEY",
+        ),
     )
     bailian_base_url: str = Field(
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",

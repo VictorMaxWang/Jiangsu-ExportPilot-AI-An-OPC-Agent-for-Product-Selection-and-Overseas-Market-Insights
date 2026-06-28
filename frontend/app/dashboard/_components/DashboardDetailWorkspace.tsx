@@ -42,24 +42,34 @@ export function DashboardDetailWorkspace({ analysisId }: DashboardDetailWorkspac
 
   useEffect(() => {
     const controller = new AbortController();
+    let active = true;
+
     async function loadDashboard() {
       setLoading(true);
       setError(null);
+      setDashboard(null);
       try {
         const response = await getDashboard(analysisId, controller.signal);
-        setDashboard(response);
+        if (active && !controller.signal.aborted) {
+          setDashboard(response);
+        }
       } catch (requestError) {
-        if (requestError instanceof DOMException && requestError.name === "AbortError") {
+        if (!active || controller.signal.aborted || (requestError instanceof DOMException && requestError.name === "AbortError")) {
           return;
         }
         setError(getFriendlyErrorMessage(requestError));
       } finally {
-        setLoading(false);
+        if (active && !controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     }
 
     void loadDashboard();
-    return () => controller.abort();
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [analysisId]);
 
   const topRecommendation = dashboard?.top_recommendations[0] ?? null;

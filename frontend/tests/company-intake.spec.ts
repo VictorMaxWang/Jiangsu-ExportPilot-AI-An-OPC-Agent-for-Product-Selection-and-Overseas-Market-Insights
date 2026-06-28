@@ -20,11 +20,13 @@ test("companies page shows localized photo CTA and selected confirmed company", 
   await mockCompanyIntakeApi(page);
   await page.goto("/companies?company_id=77&intake=confirmed");
 
-  await expect(page.getByRole("link", { name: "拍照新增企业" })).toBeVisible();
+  const photoCta = page.getByRole("link", { name: "拍照新增企业" });
+  await expect(photoCta).toBeVisible();
+  await expect(photoCta).toHaveAttribute("href", "/companies/import");
   await expect(page.getByText("企业已确认入库，可继续新增产品或启动智能体分析。")).toBeVisible();
   await expect(page.getByText("苏州出口试点有限公司").first()).toBeVisible();
 
-  await page.getByRole("link", { name: "拍照新增企业" }).click();
+  await page.goto("/companies/import");
   await expect(page).toHaveURL(/\/companies\/import$/);
 });
 

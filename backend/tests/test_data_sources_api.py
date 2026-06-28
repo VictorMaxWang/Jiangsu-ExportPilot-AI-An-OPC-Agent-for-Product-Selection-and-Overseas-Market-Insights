@@ -95,6 +95,30 @@ def test_data_source_post_routes_pass_force_live_true(
     ]
 
 
+def test_data_source_search_routes_accept_iso3_country_codes(
+    client_with_session: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, _session_factory = client_with_session
+    service = StubDataSourceService()
+    app.dependency_overrides[get_data_source_service] = lambda: service
+
+    competitors = client.post(
+        "/api/data-sources/search-competitors",
+        json={"keyword": "boho blanket", "country": "USA", "limit": 5},
+    )
+    trends = client.post(
+        "/api/data-sources/search-trends",
+        json={"query": "home decor", "country": "USA", "limit": 8},
+    )
+
+    assert competitors.status_code == 200
+    assert trends.status_code == 200
+    assert service.calls == [
+        ("search_competitors", "boho blanket", "USA", 5, False),
+        ("get_content_trends", "home decor", "USA", 8, False),
+    ]
+
+
 def test_cache_status_summarizes_fresh_and_expired_entries(
     client_with_session: tuple[TestClient, sessionmaker[Session]],
 ) -> None:

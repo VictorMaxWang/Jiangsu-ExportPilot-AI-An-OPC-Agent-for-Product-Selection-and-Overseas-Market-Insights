@@ -23,6 +23,7 @@ type ProviderStatusDashboardProps = {
 
 export function ProviderStatusDashboard({ requireAdminPassword = false }: ProviderStatusDashboardProps) {
   const [adminPassword, setAdminPassword] = useState("");
+  const [passwordRequired, setPasswordRequired] = useState(requireAdminPassword);
   const [providers, setProviders] = useState<ProviderStatusItem[]>([]);
   const [lastTests, setLastTests] = useState<TestResultMap>({});
   const [loading, setLoading] = useState(!requireAdminPassword);
@@ -31,6 +32,12 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
 
   useEffect(() => {
     if (requireAdminPassword) {
+      setPasswordRequired(true);
+    }
+  }, [requireAdminPassword]);
+
+  useEffect(() => {
+    if (passwordRequired) {
       setLoading(false);
       return;
     }
@@ -46,6 +53,10 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
         }
       } catch (error) {
         if (active) {
+          if (error instanceof ApiError && error.status === 401) {
+            setPasswordRequired(true);
+            setProviders([]);
+          }
           setErrorMessage(getFriendlyErrorMessage(error));
         }
       } finally {
@@ -59,10 +70,10 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
     return () => {
       active = false;
     };
-  }, [requireAdminPassword]);
+  }, [passwordRequired]);
 
   async function loadStatuses() {
-    if (requireAdminPassword && !adminPassword.trim()) {
+    if (passwordRequired && !adminPassword.trim()) {
       setErrorMessage("请输入管理员密码后加载状态。");
       return;
     }
@@ -74,6 +85,7 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
       setProviders(payload.providers);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
+        setPasswordRequired(true);
         setProviders([]);
       }
       setErrorMessage(getFriendlyErrorMessage(error));
@@ -83,7 +95,7 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
   }
 
   async function runProviderTest(provider: ProviderId) {
-    if (requireAdminPassword && !adminPassword.trim()) {
+    if (passwordRequired && !adminPassword.trim()) {
       setErrorMessage("请输入管理员密码后执行测试。");
       return;
     }
@@ -132,7 +144,7 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
   const passwordPanel = (
     <AdminPasswordPanel
       adminPassword={adminPassword}
-      requireAdminPassword={requireAdminPassword}
+      requireAdminPassword={passwordRequired}
       onAdminPasswordChange={setAdminPassword}
       onLoad={() => void loadStatuses()}
     />
@@ -168,7 +180,7 @@ export function ProviderStatusDashboard({ requireAdminPassword = false }: Provid
     );
   }
 
-  if (requireAdminPassword && providers.length === 0) {
+  if (passwordRequired && providers.length === 0) {
     return <div className="grid gap-5">{passwordPanel}</div>;
   }
 

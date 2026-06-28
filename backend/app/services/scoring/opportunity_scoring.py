@@ -214,7 +214,14 @@ class OpportunityScoringService:
             if not request.product_ids:
                 return []
             statement = statement.where(Product.id.in_(request.product_ids))
-        return list(self._db.scalars(statement))
+        products = list(self._db.scalars(statement))
+        if request.product_ids is not None:
+            found_ids = {product.id for product in products}
+            missing_ids = [product_id for product_id in request.product_ids if product_id not in found_ids]
+            if missing_ids:
+                missing = ", ".join(str(product_id) for product_id in missing_ids)
+                raise ValueError(f"Products not found for company: {missing}")
+        return products
 
     def _keyword_for_product(self, product: Product) -> str:
         keyword = next(iter(self._keywords_for_product(product)), None)

@@ -42,26 +42,39 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
 
   const loadReport = useMemo(() => {
     return async (signal?: AbortSignal, options: { showLoading?: boolean } = {}) => {
+      const canUpdate = () => !signal?.aborted;
       if (options.showLoading ?? true) {
         setLoading(true);
       }
       setError(null);
       try {
         const reportResponse = await getReport(reportId, signal);
+        if (!canUpdate()) {
+          return;
+        }
         setReport(reportResponse);
         try {
           const versionResponse = await listReportVersions(reportId, signal);
-          setVersions(versionResponse.items);
+          if (canUpdate()) {
+            setVersions(versionResponse.items);
+          }
         } catch {
-          setVersions([]);
+          if (canUpdate()) {
+            setVersions([]);
+          }
         }
         try {
-          setDashboard(await getDashboard(reportResponse.analysis_id, signal));
+          const dashboardResponse = await getDashboard(reportResponse.analysis_id, signal);
+          if (canUpdate()) {
+            setDashboard(dashboardResponse);
+          }
         } catch {
-          setDashboard(null);
+          if (canUpdate()) {
+            setDashboard(null);
+          }
         }
       } catch (requestError) {
-        if (requestError instanceof DOMException && requestError.name === "AbortError") {
+        if (!canUpdate() || (requestError instanceof DOMException && requestError.name === "AbortError")) {
           return;
         }
         setError(getFriendlyErrorMessage(requestError));
@@ -69,7 +82,7 @@ export function ReportDetailWorkspace({ reportId }: ReportDetailWorkspaceProps) 
         setVersions([]);
         setDashboard(null);
       } finally {
-        if (options.showLoading ?? true) {
+        if ((options.showLoading ?? true) && canUpdate()) {
           setLoading(false);
         }
       }

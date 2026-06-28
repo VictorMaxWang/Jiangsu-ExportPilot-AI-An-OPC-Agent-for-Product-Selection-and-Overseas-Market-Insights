@@ -1,23 +1,28 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.ai import ProductKeywordsResponse
 
 
 class ProductBase(BaseModel):
     company_id: int
-    product_name_cn: str
+    product_name_cn: str = Field(min_length=1)
     product_name_en: str | None = None
     category: str | None = None
-    cost_price_cny: Decimal | None = None
-    weight_kg: Decimal | None = None
+    cost_price_cny: Decimal | None = Field(default=None, ge=0)
+    weight_kg: Decimal | None = Field(default=None, ge=0)
     package_size: str | None = None
     material: str | None = None
     certification: str | None = None
-    moq: int | None = None
+    moq: int | None = Field(default=None, ge=0)
     description: str | None = None
+
+    @field_validator("product_name_cn", mode="before")
+    @classmethod
+    def _strip_product_name_cn(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
 
 
 class ProductCreate(ProductBase):
@@ -26,16 +31,21 @@ class ProductCreate(ProductBase):
 
 class ProductUpdate(BaseModel):
     company_id: int | None = None
-    product_name_cn: str | None = None
+    product_name_cn: str | None = Field(default=None, min_length=1)
     product_name_en: str | None = None
     category: str | None = None
-    cost_price_cny: Decimal | None = None
-    weight_kg: Decimal | None = None
+    cost_price_cny: Decimal | None = Field(default=None, ge=0)
+    weight_kg: Decimal | None = Field(default=None, ge=0)
     package_size: str | None = None
     material: str | None = None
     certification: str | None = None
-    moq: int | None = None
+    moq: int | None = Field(default=None, ge=0)
     description: str | None = None
+
+    @field_validator("product_name_cn", mode="before")
+    @classmethod
+    def _strip_product_name_cn(cls, value: str | None) -> str | None:
+        return value.strip() if isinstance(value, str) else value
 
 
 class ProductRead(ProductBase):

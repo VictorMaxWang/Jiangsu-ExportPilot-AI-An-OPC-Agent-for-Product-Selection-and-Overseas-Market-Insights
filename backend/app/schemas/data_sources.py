@@ -14,14 +14,14 @@ class DataSourceMarketProfileRequest(BaseModel):
 
 class DataSourceSearchTrendsRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    country: str | None = Field(default=None, min_length=2, max_length=2)
+    country: str | None = Field(default=None, min_length=2, max_length=3)
     limit: int = Field(default=20, ge=1, le=50)
     force_live: bool = False
 
 
 class DataSourceSearchCompetitorsRequest(BaseModel):
     keyword: str = Field(..., min_length=1)
-    country: str | None = Field(default=None, min_length=2, max_length=2)
+    country: str | None = Field(default=None, min_length=2, max_length=3)
     limit: int = Field(default=20, ge=1, le=50)
     force_live: bool = False
 
